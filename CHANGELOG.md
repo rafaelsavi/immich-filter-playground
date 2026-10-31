@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.1.1] - 2026-10-31
+
+### Changed
+- **Profile Preset Streamlining**: Removed hardcoded default presets in favor of pure, custom user-defined search profiles.
+
 ## [1.1.0] - 2026-10-31
 
 ### Added

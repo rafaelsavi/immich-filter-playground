@@ -1364,102 +1364,8 @@ function applyJsonEditorToTree() {
 }
 
 // ==========================================================================
-// Search Profiles & Presets
+// Search Profiles
 // ==========================================================================
-
-const DEFAULT_PRESETS = [
-	{
-		id: 'preset:favorites',
-		name: '⭐ Favorites (Photos)',
-		isPreset: true,
-		searchMode: 'random',
-		includeVideos: false,
-		includeArchived: false,
-		buildTree: () => ({
-			id: 'root',
-			type: 'group',
-			combiner: 'AND',
-			children: [
-				{ id: generateNodeId('r'), type: 'rule', field: 'favorite', operator: 'true', value: true },
-				{ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'IMAGE', value: 'IMAGE' }
-			]
-		})
-	},
-	{
-		id: 'preset:nested-or',
-		name: '🔀 Nested OR (Places/People)',
-		isPreset: true,
-		searchMode: 'random',
-		includeVideos: true,
-		includeArchived: false,
-		buildTree: () => {
-			const sampleCountries = state.metadata.countries.slice(0, 2);
-			const samplePeople = state.metadata.people.slice(0, 1).map(p => p.id);
-			return {
-				id: 'root',
-				type: 'group',
-				combiner: 'AND',
-				children: [
-					{ id: generateNodeId('r'), type: 'rule', field: 'favorite', operator: 'true', value: true },
-					{
-						id: generateNodeId('g'),
-						type: 'group',
-						combiner: 'OR',
-						children: [
-							{ id: generateNodeId('r'), type: 'rule', field: 'country', operator: 'in', value: sampleCountries },
-							{ id: generateNodeId('r'), type: 'rule', field: 'people', operator: 'any', value: samplePeople }
-						]
-					}
-				]
-			};
-		}
-	},
-	{
-		id: 'preset:videos',
-		name: '🎬 Recent Videos',
-		isPreset: true,
-		searchMode: 'metadata',
-		orderByField: 'takenAt',
-		orderByDirection: 'desc',
-		includeVideos: true,
-		includeArchived: false,
-		buildTree: () => ({
-			id: 'root',
-			type: 'group',
-			combiner: 'AND',
-			children: [
-				{ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'VIDEO', value: 'VIDEO' }
-			]
-		})
-	},
-	{
-		id: 'preset:top-rated',
-		name: '🌟 Top Rated (4+ Stars)',
-		isPreset: true,
-		searchMode: 'metadata',
-		orderByField: 'rating',
-		orderByDirection: 'desc',
-		includeVideos: true,
-		includeArchived: false,
-		buildTree: () => ({
-			id: 'root',
-			type: 'group',
-			combiner: 'AND',
-			children: [
-				{ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'gte', value: 4 }
-			]
-		})
-	},
-	{
-		id: 'preset:clear',
-		name: '🗑️ Clear / Blank',
-		isPreset: true,
-		searchMode: 'random',
-		includeVideos: true,
-		includeArchived: false,
-		buildTree: () => ({ id: 'root', type: 'group', combiner: 'AND', children: [] })
-	}
-];
 
 async function loadProfiles() {
 	let serverProfiles = [];
@@ -1496,22 +1402,16 @@ async function loadProfiles() {
 }
 
 function renderProfilesDropdown() {
-	const optgroup = document.getElementById('saved-profiles-optgroup');
 	const selectEl = document.getElementById('profile-select');
 	const deleteBtn = document.getElementById('btn-delete-profile');
-	if (!optgroup || !selectEl) return;
+	if (!selectEl) return;
 
-	optgroup.innerHTML = '';
-	if (state.profiles.length === 0) {
-		optgroup.style.display = 'none';
-	} else {
-		optgroup.style.display = '';
-		for (const p of state.profiles) {
-			const opt = document.createElement('option');
-			opt.value = p.id;
-			opt.textContent = `💾 ${p.name}`;
-			optgroup.appendChild(opt);
-		}
+	selectEl.innerHTML = '<option value="">Custom Filter</option>';
+	for (const p of state.profiles) {
+		const opt = document.createElement('option');
+		opt.value = p.id;
+		opt.textContent = `📁 ${p.name}`;
+		selectEl.appendChild(opt);
 	}
 
 	selectEl.value = state.activeProfileId || '';
@@ -1534,22 +1434,7 @@ function applyProfile(profileId) {
 		return;
 	}
 
-	// Check presets
-	const preset = DEFAULT_PRESETS.find(p => p.id === profileId || p.id === `preset:${profileId}` || (profileId === 'Clear' && p.id === 'preset:clear'));
-	if (preset) {
-		state.ruleTree = preset.buildTree();
-		if (preset.searchMode) state.searchMode = preset.searchMode;
-		if (preset.orderByField) state.orderByField = preset.orderByField;
-		if (preset.orderByDirection) state.orderByDirection = preset.orderByDirection;
-		if (preset.includeVideos !== undefined) state.includeVideos = preset.includeVideos;
-		if (preset.includeArchived !== undefined) state.includeArchived = preset.includeArchived;
-		syncToolbarControls();
-		renderRuleTree();
-		syncFromRuleTree();
-		return;
-	}
-
-	// Check custom saved profiles
+	// Load custom saved profile
 	const prof = state.profiles.find(p => p.id === profileId);
 	if (prof) {
 		if (prof.ruleTree && typeof prof.ruleTree === 'object') {
@@ -1778,11 +1663,6 @@ document.addEventListener('DOMContentLoaded', () => {
 			if (dialog) dialog.close();
 		});
 	}
-
-	// Legacy Presets buttons fallback
-	document.querySelectorAll('[data-preset]').forEach(btn => {
-		btn.addEventListener('click', () => applyProfile(btn.dataset.preset));
-	});
 
 	// Code Tabs (Filter JSON / Request Body / cURL)
 	document.querySelectorAll('.json-tab-btn').forEach(btn => {

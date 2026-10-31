@@ -386,7 +386,6 @@ p, blockquote, li, .pretty-text {
 	color: var(--text-secondary);
 }
 
-.preset-group,
 .profile-toolbar {
 	display: flex;
 	align-items: center;
@@ -394,7 +393,6 @@ p, blockquote, li, .pretty-text {
 	gap: 0.4rem;
 }
 
-.preset-label,
 .profile-label {
 	font-size: 0.75rem;
 	font-weight: 600;

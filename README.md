@@ -18,7 +18,7 @@ A modern, standalone visual filter designer and testing playground for the **Imm
 
 - **📁 Search Profiles & Quick Switching**:
   - Save your favourite search filters and query parameters into named profiles.
-  - Quick-switch between custom profiles and built-in presets (e.g. ⭐ Favorites, 🔀 Nested OR, 🎬 Recent Videos, 🌟 Top Rated) via a dedicated dropdown.
+  - Quick-switch between custom saved profiles via a dedicated dropdown.
   - Profiles remember rule trees, search modes, target user accounts, sort settings, and video/archive options.
   - Synchronized via backend API (`/api/profiles`) with seamless local browser persistence fallback.
 

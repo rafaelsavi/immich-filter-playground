@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.1.3] - 2026-10-31
+
+### Changed
+- **Results Toolbar Redesign**: Replaced technical "Random" vs "Metadata" labels with user-friendly **🎲 Random Sample** and **📅 Sorted Timeline** modes.
+- **Contextual Action Bar**: Added dedicated controls for active mode: "Reshuffle Sample" button in Random mode, and labeled "Sort by:" dropdown with descriptive options in Sorted Timeline mode.
+
 ## [1.1.2] - 2026-10-31
 
 ### Fixed

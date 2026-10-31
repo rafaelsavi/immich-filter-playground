@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build static binary with stripped debug symbols
-ARG VERSION=1.1.2
+ARG VERSION=1.1.3
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w -X main.version=${VERSION}" \

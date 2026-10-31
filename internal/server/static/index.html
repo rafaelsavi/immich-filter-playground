@@ -167,39 +167,55 @@
 				<div class="panel-card results-card">
 					<!-- Results Toolbar -->
 					<div class="results-header">
+						<!-- Top Row: Title, Counter & View Mode Switcher -->
 						<div class="results-title-row">
 							<div class="results-heading">
 								<h2>🖼️ Live Assets</h2>
 								<span id="results-count-badge" class="count-badge">Loading...</span>
 							</div>
 
-							<div class="results-mode-controls">
-								<div class="segmented-control" role="group" aria-label="Search Endpoint Mode">
-									<button type="button" class="seg-btn active" data-search-mode="random" title="POST /api/search/random">
-										🎲 Random
-									</button>
-									<button type="button" class="seg-btn" data-search-mode="metadata" title="POST /api/search/metadata">
-										📑 Metadata
-									</button>
-								</div>
-
-								<button type="button" class="btn btn-sm btn-secondary" id="btn-reshuffle" title="Fetch a new random sample with the current filter">
-									🎲 Reshuffle
+							<div class="results-mode-selector" role="radiogroup" aria-label="Asset View Mode">
+								<button type="button" class="mode-toggle-btn active" data-search-mode="random" role="radio" aria-checked="true" title="Random Sample (Immich /api/search/random endpoint)">
+									🎲 Random Sample
 								</button>
-
-								<select id="metadata-sort-select" class="sort-select" hidden aria-label="Sort Metadata Results">
-									<option value="localDateTime:desc">Taken Date (Newest)</option>
-									<option value="localDateTime:asc">Taken Date (Oldest)</option>
-									<option value="fileCreatedAt:desc">Created Date (Newest)</option>
-									<option value="fileCreatedAt:asc">Created Date (Oldest)</option>
-									<option value="rating:desc">Rating (Highest)</option>
-									<option value="rating:asc">Rating (Lowest)</option>
-									<option value="fileSizeInBytes:desc">File Size (Largest)</option>
-									<option value="fileSizeInBytes:asc">File Size (Smallest)</option>
-								</select>
+								<button type="button" class="mode-toggle-btn" data-search-mode="metadata" role="radio" aria-checked="false" title="Sorted Timeline (Immich /api/search/metadata endpoint)">
+									📅 Sorted Timeline
+								</button>
 							</div>
 						</div>
 
+						<!-- Middle Row: Active Mode Controls Bar -->
+						<div class="results-mode-context-bar">
+							<!-- Random Mode Panel -->
+							<div id="random-mode-panel" class="mode-panel">
+								<button type="button" class="btn btn-sm btn-secondary reshuffle-btn" id="btn-reshuffle" title="Draw a new random set of assets matching your filters">
+									<span class="reshuffle-icon">🎲</span> Reshuffle Sample
+								</button>
+								<span class="mode-context-hint">Picks a random sample across all matching assets</span>
+							</div>
+
+							<!-- Sorted Mode Panel -->
+							<div id="sorted-mode-panel" class="mode-panel" hidden>
+								<div class="sort-control-group">
+									<label for="metadata-sort-select" class="sort-label">Sort by:</label>
+									<div class="select-wrapper">
+										<select id="metadata-sort-select" class="sort-select" aria-label="Sort timeline results by">
+											<option value="localDateTime:desc">📅 Date Taken (Newest First)</option>
+											<option value="localDateTime:asc">📅 Date Taken (Oldest First)</option>
+											<option value="fileCreatedAt:desc">📥 Date Added (Newest First)</option>
+											<option value="fileCreatedAt:asc">📥 Date Added (Oldest First)</option>
+											<option value="rating:desc">⭐ Rating (Highest First)</option>
+											<option value="rating:asc">⭐ Rating (Lowest First)</option>
+											<option value="fileSizeInBytes:desc">💾 File Size (Largest First)</option>
+											<option value="fileSizeInBytes:asc">💾 File Size (Smallest First)</option>
+										</select>
+									</div>
+								</div>
+								<span class="mode-context-hint">Chronological or attribute-sorted timeline</span>
+							</div>
+						</div>
+
+						<!-- Bottom Row: Filter Toggles & Sample Limit -->
 						<div class="results-subtoolbar">
 							<div class="toggle-filters">
 								<label class="checkbox-pill">
@@ -213,7 +229,7 @@
 							</div>
 
 							<div class="limit-selector">
-								<span class="limit-label">Sample:</span>
+								<span class="limit-label">Display Limit:</span>
 								<button type="button" class="limit-pill active" data-limit="24">24</button>
 								<button type="button" class="limit-pill" data-limit="48">48</button>
 								<button type="button" class="limit-pill" data-limit="96">96</button>

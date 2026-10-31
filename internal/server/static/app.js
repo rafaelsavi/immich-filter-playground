@@ -1316,18 +1316,20 @@ function syncToolbarControls() {
 	const archToggle = document.getElementById('toggle-include-archived');
 	if (archToggle) archToggle.checked = state.includeArchived;
 
-	document.querySelectorAll('.seg-btn[data-search-mode]').forEach(btn => {
-		btn.classList.toggle('active', btn.dataset.searchMode === state.searchMode);
+	document.querySelectorAll('.seg-btn[data-search-mode], .mode-toggle-btn[data-search-mode]').forEach(btn => {
+		const isActive = btn.dataset.searchMode === state.searchMode;
+		btn.classList.toggle('active', isActive);
+		btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
 	});
 
-	const reshuffleBtn = document.getElementById('btn-reshuffle');
+	const randomPanel = document.getElementById('random-mode-panel');
+	const sortedPanel = document.getElementById('sorted-mode-panel');
+	if (randomPanel) randomPanel.hidden = (state.searchMode !== 'random');
+	if (sortedPanel) sortedPanel.hidden = (state.searchMode !== 'metadata');
+
 	const sortSelect = document.getElementById('metadata-sort-select');
-	if (reshuffleBtn) reshuffleBtn.hidden = (state.searchMode !== 'random');
-	if (sortSelect) {
-		sortSelect.hidden = (state.searchMode !== 'metadata');
-		if (state.orderByField) {
-			sortSelect.value = `${state.orderByField}:${state.orderByDirection}`;
-		}
+	if (sortSelect && state.orderByField) {
+		sortSelect.value = `${state.orderByField}:${state.orderByDirection}`;
 	}
 
 	document.querySelectorAll('.limit-pill').forEach(btn => {
@@ -1483,7 +1485,7 @@ function openSaveProfileModal() {
 	const userEl = document.getElementById('profile-summary-user');
 	const togglesEl = document.getElementById('profile-summary-toggles');
 
-	if (modeEl) modeEl.textContent = `⚡ Search Mode: ${state.searchMode === 'metadata' ? 'Metadata' : 'Random'}` + (state.searchMode === 'metadata' ? ` (${state.orderByField} ${state.orderByDirection.toUpperCase()})` : '');
+	if (modeEl) modeEl.textContent = `⚡ Mode: ${state.searchMode === 'metadata' ? 'Sorted Timeline' : 'Random Sample'}` + (state.searchMode === 'metadata' ? ` (${state.orderByField} ${state.orderByDirection.toUpperCase()})` : '');
 	if (userEl) userEl.textContent = `👤 Account: ${state.selectedUser ? `@${state.selectedUser}` : 'All Accounts'}`;
 	if (togglesEl) togglesEl.textContent = `🎬 Videos: ${state.includeVideos ? 'Included' : 'Excluded'}, Archived: ${state.includeArchived ? 'Included' : 'Excluded'}, Sample: ${state.sampleSize}`;
 
@@ -1743,7 +1745,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	}
 
 	// Search Mode (Random vs Metadata)
-	document.querySelectorAll('.seg-btn[data-search-mode]').forEach(btn => {
+	document.querySelectorAll('.seg-btn[data-search-mode], .mode-toggle-btn[data-search-mode]').forEach(btn => {
 		btn.addEventListener('click', () => {
 			state.searchMode = btn.dataset.searchMode;
 			syncToolbarControls();

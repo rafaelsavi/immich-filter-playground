@@ -256,13 +256,13 @@ type SearchFilter struct {
 }
 
 type SearchRequestBody struct {
-	Cursor      string       `json:"cursor,omitempty"`
-	Filter      SearchFilter `json:"filter"`
-	OrderBy     []SearchOrder `json:"orderBy,omitempty,omitzero"`
-	Size        int          `json:"size,omitempty"`
-	WithExif    bool         `json:"withExif,omitempty"`
-	WithPeople  bool         `json:"withPeople,omitempty"`
-	WithStacked bool         `json:"withStacked,omitempty"`
+	Cursor      string        `json:"cursor,omitempty"`
+	Filter      SearchFilter  `json:"filter"`
+	OrderBy     *SearchOrder  `json:"orderBy,omitempty,omitzero"`
+	Size        int           `json:"size,omitempty"`
+	WithExif    bool          `json:"withExif,omitempty"`
+	WithPeople  bool          `json:"withPeople,omitempty"`
+	WithStacked bool          `json:"withStacked,omitempty"`
 }
 
 type SearchMetadataResponse struct {

@@ -408,13 +408,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		queries = append(queries, userFilterQuery{user: "", filter: immich.SearchFilter{}})
 	}
 
-	var orderBy []immich.SearchOrder
-	if searchMode == "metadata" && req.OrderByField != "" {
+	var orderBy *immich.SearchOrder
+	if searchMode == "metadata" {
+		field := "localDateTime"
+		if req.OrderByField != "" {
+			field = normalizeOrderByField(req.OrderByField)
+		}
 		dir := immich.Desc
 		if strings.ToLower(req.OrderByDirection) == "asc" {
 			dir = immich.Asc
 		}
-		orderBy = []immich.SearchOrder{{Field: req.OrderByField, Direction: dir}}
+		orderBy = &immich.SearchOrder{Field: field, Direction: dir}
 	}
 
 	// Build representative request body JSON for display
@@ -499,13 +503,28 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func normalizeOrderByField(f string) string {
+	switch strings.ToLower(strings.TrimSpace(f)) {
+	case "takenat", "localdatetime":
+		return "localDateTime"
+	case "createdat", "filecreatedat":
+		return "fileCreatedAt"
+	case "rating":
+		return "rating"
+	case "filesizeinbytes", "filesize", "size":
+		return "fileSizeInBytes"
+	default:
+		return "localDateTime"
+	}
+}
+
 func (s *Server) executeUserSearch(
 	ctx context.Context,
 	apiKey string,
 	q userFilterQuery,
 	limit int,
 	searchMode string,
-	orderBy []immich.SearchOrder,
+	orderBy *immich.SearchOrder,
 	includeVideos, includeArchived bool,
 ) ([]assetItem, error) {
 	var assets []immich.Asset

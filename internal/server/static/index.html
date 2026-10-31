@@ -188,10 +188,14 @@
 								</button>
 
 								<select id="metadata-sort-select" class="sort-select" hidden aria-label="Sort Metadata Results">
-									<option value="takenAt:desc">Taken Date (Newest)</option>
-									<option value="takenAt:asc">Taken Date (Oldest)</option>
-									<option value="createdAt:desc">Created Date (Newest)</option>
-									<option value="createdAt:asc">Created Date (Oldest)</option>
+									<option value="localDateTime:desc">Taken Date (Newest)</option>
+									<option value="localDateTime:asc">Taken Date (Oldest)</option>
+									<option value="fileCreatedAt:desc">Created Date (Newest)</option>
+									<option value="fileCreatedAt:asc">Created Date (Oldest)</option>
+									<option value="rating:desc">Rating (Highest)</option>
+									<option value="rating:asc">Rating (Lowest)</option>
+									<option value="fileSizeInBytes:desc">File Size (Largest)</option>
+									<option value="fileSizeInBytes:asc">File Size (Smallest)</option>
 								</select>
 							</div>
 						</div>

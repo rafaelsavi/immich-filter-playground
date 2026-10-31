@@ -68,6 +68,22 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	if err := json.Unmarshal(recSearch.Body.Bytes(), &sResp); err != nil {
 		t.Fatalf("unmarshaling search response: %v", err)
 	}
+
+	// 2b. Test POST /api/search (metadata with orderBy)
+	metaPayload := `{"filterJson":"{\"country\":{\"in\":[\"Japan\"]}}","limit":24,"searchMode":"metadata","orderByField":"takenAt","orderByDirection":"desc"}`
+	reqMetaSearch := httptest.NewRequest(http.MethodPost, "/api/search", bytes.NewBufferString(metaPayload))
+	recMetaSearch := httptest.NewRecorder()
+	srv.ServeHTTP(recMetaSearch, reqMetaSearch)
+	if recMetaSearch.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/search (metadata), got %d", recMetaSearch.Code)
+	}
+	var metaSearchResp searchResponse
+	if err := json.Unmarshal(recMetaSearch.Body.Bytes(), &metaSearchResp); err != nil {
+		t.Fatalf("unmarshaling metadata search response: %v", err)
+	}
+	if metaSearchResp.Error != "" {
+		t.Fatalf("metadata search returned error: %s", metaSearchResp.Error)
+	}
 	// 3. Test GET /api/health
 	reqHealth := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	recHealth := httptest.NewRecorder()

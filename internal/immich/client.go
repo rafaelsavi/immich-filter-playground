@@ -155,9 +155,17 @@ func (c *Client) doJSON(ctx context.Context, apiKey, method, endpoint string, qu
 		var errResp struct {
 			Message any `json:"message"`
 			Error   any `json:"error"`
+			Errors  any `json:"errors"`
 		}
-		if json.Unmarshal(respBytes, &errResp) == nil && errResp.Message != nil {
-			return respBytes, resp.StatusCode, fmt.Errorf("Immich API (%d): %v", resp.StatusCode, errResp.Message)
+		if json.Unmarshal(respBytes, &errResp) == nil {
+			if errResp.Errors != nil {
+				if errBytes, err := json.Marshal(errResp.Errors); err == nil {
+					return respBytes, resp.StatusCode, fmt.Errorf("Immich API (%d): %v - %s", resp.StatusCode, errResp.Message, string(errBytes))
+				}
+			}
+			if errResp.Message != nil {
+				return respBytes, resp.StatusCode, fmt.Errorf("Immich API (%d): %v", resp.StatusCode, errResp.Message)
+			}
 		}
 		return respBytes, resp.StatusCode, fmt.Errorf("Immich API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBytes)))
 	}
@@ -380,7 +388,7 @@ func (c *Client) SearchRandom(ctx context.Context, apiKey string, filter SearchF
 }
 
 // SearchMetadata queries /api/search/metadata with the given SearchFilter.
-func (c *Client) SearchMetadata(ctx context.Context, apiKey string, filter SearchFilter, size int, orderBy []SearchOrder, includeVideos, includeArchived bool) (SearchMetadataResponse, error) {
+func (c *Client) SearchMetadata(ctx context.Context, apiKey string, filter SearchFilter, size int, orderBy *SearchOrder, includeVideos, includeArchived bool) (SearchMetadataResponse, error) {
 	var response SearchMetadataResponse
 	if size <= 0 {
 		size = 24

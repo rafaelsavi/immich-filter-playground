@@ -8,7 +8,7 @@ const state = {
 	accounts: [],
 	selectedUser: '',
 	searchMode: 'random',
-	orderByField: 'takenAt',
+	orderByField: 'localDateTime',
 	orderByDirection: 'desc',
 	sampleSize: 24,
 	includeVideos: true,
@@ -1764,7 +1764,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (sortSelect) {
 		sortSelect.addEventListener('change', () => {
 			const [field, dir] = sortSelect.value.split(':');
-			state.orderByField = field || 'takenAt';
+			state.orderByField = field || 'localDateTime';
 			state.orderByDirection = dir || 'desc';
 			runLiveSearch();
 		});

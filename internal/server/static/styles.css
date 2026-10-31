@@ -154,6 +154,10 @@ body {
 	line-height: 1.45;
 }
 
+[hidden] {
+	display: none !important;
+}
+
 /* Target specific heading elements for balanced wrapping */
 h1, h2, h3, h4, h5, h6 {
 	text-wrap: balance;

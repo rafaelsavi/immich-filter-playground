@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.1.2] - 2026-10-31
+
+### Fixed
+- **Immich API v2 `orderBy` Validation**: Corrected `orderBy` schema to a single object (`{ "field": "...", "direction": "..." }`) as required by Immich Search API v2.
+- **Sort Field Normalization**: Mapped sorting fields to valid Immich enums (`localDateTime`, `fileCreatedAt`, `rating`, `fileSizeInBytes`).
+
 ## [1.1.1] - 2026-10-31
 
 ### Changed

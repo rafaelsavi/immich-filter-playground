@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.2.0] - 2026-10-31
+
+Official public production release.
+
+### Added
+- **Changelog & Central Versioning**: Added `CHANGELOG.md` following Keep a Changelog standard and synchronized version tracking across `pyproject.toml` and `main.go`.
+- **Public Repository Setup**: Updated all repository links, badges, Docker registry tags, and contribution guides for open-source release.
+
 ## [1.1.4] - 2026-10-31
 
 ### Fixed

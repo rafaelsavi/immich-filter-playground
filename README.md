@@ -1,8 +1,8 @@
 # ⚡ Immich Filter Playground
 
-[![CI](https://github.com/immich-app/immich-filter-playground/actions/workflows/ci.yml/badge.svg)](https://github.com/immich-app/immich-filter-playground/actions)
+[![CI](https://github.com/rafaelsavi/immich-filter-playground/actions/workflows/ci.yml/badge.svg)](https://github.com/rafaelsavi/immich-filter-playground/actions)
 [![Go Version](https://img.shields.io/badge/go-1.24-blue.svg)](https://go.dev/)
-[![Docker](https://img.shields.io/badge/docker-multiarch-blue?logo=docker)](https://github.com/immich-app/immich-filter-playground/pkgs/container/immich-filter-playground)
+[![Docker](https://img.shields.io/badge/docker-multiarch-blue?logo=docker)](https://github.com/rafaelsavi/immich-filter-playground/pkgs/container/immich-filter-playground)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A modern, standalone visual filter designer and testing playground for the **Immich Search API v2**. Build complex nested `AND` / `OR` rule trees, inspect and edit Filter JSON & API payloads in real time, and preview matching assets live from your Immich server.
@@ -64,7 +64,7 @@ Add to your `docker-compose.yml` (e.g. alongside your Immich stack):
 ```yaml
 services:
   immich-filter-playground:
-    image: ghcr.io/<owner>/immich-filter-playground:latest
+    image: ghcr.io/rafaelsavi/immich-filter-playground:latest
     container_name: immich-filter-playground
     restart: unless-stopped
     ports:
@@ -85,7 +85,7 @@ docker compose up -d
 ### Option 3: From Source (Requires Go 1.23+)
 
 ```bash
-git clone https://github.com/<owner>/immich-filter-playground.git
+git clone https://github.com/rafaelsavi/immich-filter-playground.git
 cd immich-filter-playground
 cp config.example.yaml config.yaml
 # Edit config.yaml with your Immich URL & API key

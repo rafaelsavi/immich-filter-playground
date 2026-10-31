@@ -10,7 +10,7 @@ Thank you for your interest in contributing to **Immich Filter Playground**!
 
 2. **Clone and run locally**:
    ```bash
-   git clone https://github.com/<owner>/immich-filter-playground.git
+   git clone https://github.com/rafaelsavi/immich-filter-playground.git
    cd immich-filter-playground
    cp config.example.yaml config.yaml
    # Edit config.yaml with your Immich URL & API key

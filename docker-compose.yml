@@ -1,6 +1,6 @@
 services:
   immich-filter-playground:
-    # image: ghcr.io/<owner>/immich-filter-playground:latest
+    # image: ghcr.io/rafaelsavi/immich-filter-playground:latest
     build: .
     container_name: immich-filter-playground
     restart: unless-stopped

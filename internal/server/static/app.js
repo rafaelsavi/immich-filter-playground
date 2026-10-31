@@ -39,6 +39,7 @@ const state = {
 
 let searchDebounceTimer = null;
 let activeSearchController = null;
+let searchSequenceId = 0;
 
 // ==========================================================================
 // Utilities
@@ -267,7 +268,11 @@ window.rtChangeOperator = function(ruleId, newOp) {
 	syncFromRuleTree();
 };
 
-window.rtToggleMultiValue = function(ruleId, val) {
+window.rtToggleMultiValue = function(ruleId, val, e) {
+	if (e) {
+		e.stopPropagation();
+		e.preventDefault();
+	}
 	const rule = findNode(state.ruleTree, ruleId);
 	if (!rule) return;
 	if (!Array.isArray(rule.value)) rule.value = [];
@@ -492,7 +497,7 @@ function renderRuleHTML(rule) {
 		for (const opt of available) {
 			const isSel = selectedVals.includes(opt.value);
 			dropdownItems += `
-				<div class="rt-dropdown-item ${isSel ? 'selected' : ''}" onclick="rtToggleMultiValue('${escapeJsString(rule.id)}', '${escapeJsString(opt.value)}')">
+				<div class="rt-dropdown-item ${isSel ? 'selected' : ''}" onclick="rtToggleMultiValue('${escapeJsString(rule.id)}', '${escapeJsString(opt.value)}', event)">
 					<span>${escapeHtml(opt.label)}</span>
 					${isSel ? '<span>✓</span>' : ''}
 				</div>
@@ -975,18 +980,29 @@ function syncFromRuleTree(opts = {}) {
 	scheduleLiveSearch(JSON.stringify(ast));
 }
 
-function scheduleLiveSearch(filterJsonStr) {
-	if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+function scheduleLiveSearch(filterJsonStr, delay = 220) {
+	if (searchDebounceTimer) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = null;
+	}
 	searchDebounceTimer = setTimeout(() => {
+		searchDebounceTimer = null;
 		runLiveSearch(filterJsonStr);
-	}, 180);
+	}, delay);
 }
 
 async function runLiveSearch(filterJsonStr) {
+	// Cancel any pending debounced search so it won't fire after this search
+	if (searchDebounceTimer) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = null;
+	}
+
 	if (activeSearchController) {
 		activeSearchController.abort();
 	}
 	activeSearchController = new AbortController();
+	const thisSeq = ++searchSequenceId;
 
 	const countBadge = document.getElementById('results-count-badge');
 	if (countBadge) countBadge.textContent = 'Searching Immich...';
@@ -1012,9 +1028,16 @@ async function runLiveSearch(filterJsonStr) {
 		});
 
 		const data = await resp.json();
+		// If a newer search was dispatched while this request was in flight, ignore stale response
+		if (thisSeq !== searchSequenceId) {
+			return;
+		}
 		renderSearchResults(data);
 	} catch (err) {
-		if (err.name === 'AbortError') return;
+		// If aborted or superseded by a newer search, drop silent without error
+		if (thisSeq !== searchSequenceId || err.name === 'AbortError') {
+			return;
+		}
 		renderSearchResults({ error: err.message || 'Network request failed' });
 	}
 }
@@ -1585,9 +1608,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 	// Close dropdowns when clicking outside value box
 	document.addEventListener('click', (e) => {
-		if (!e.target.closest('.rt-value-box')) {
-			document.querySelectorAll('.rt-dropdown-menu.open').forEach(el => el.classList.remove('open'));
+		if (e.target && (e.target.closest('.rt-value-box') || e.target.closest('.rt-dropdown-item'))) {
+			return;
 		}
+		document.querySelectorAll('.rt-dropdown-menu.open').forEach(el => el.classList.remove('open'));
 	});
 
 	// Theme switcher

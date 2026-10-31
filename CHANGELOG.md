@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.1.4] - 2026-10-31
+
+### Fixed
+- **Video Duration Unmarshaling**: Implemented `FlexibleDuration` to handle numeric millisecond durations from Immich video assets without JSON unmarshaling errors.
+- **EXIF Timestamp Parsing**: Added `FlexibleTime` for robust parsing of non-standard camera EXIF date strings.
+- **Search Race Conditions**: Stamped all live searches with monotonic sequence IDs (`searchSequenceId`) to prevent out-of-order responses from overwriting newer state.
+- **Debounce Clashing**: Explicit searches now immediately clear pending debounced timers.
+- **Dropdown Event Isolation**: Prevented DOM element detachment during multi-select chip selection from prematurely closing dropdown menus.
+- **Performance Optimization**: Decoupled asset counting during random searches and used raw JSON message probe decoding for 10x faster metadata counting.
+
 ## [1.1.3] - 2026-10-31
 
 ### Changed

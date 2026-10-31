@@ -1,6 +1,100 @@
 package immich
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// FlexibleDuration handles video durations that may be numbers (ms or secs), formatted strings, or null.
+type FlexibleDuration string
+
+func (d *FlexibleDuration) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*d = ""
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*d = FlexibleDuration(s)
+		return nil
+	}
+	var n float64
+	if err := json.Unmarshal(b, &n); err == nil {
+		if n > 1000 {
+			totalSecs := int(n / 1000)
+			mins := totalSecs / 60
+			secs := totalSecs % 60
+			*d = FlexibleDuration(fmt.Sprintf("%d:%02d", mins, secs))
+		} else if n > 0 {
+			mins := int(n) / 60
+			secs := int(n) % 60
+			if mins > 0 {
+				*d = FlexibleDuration(fmt.Sprintf("%d:%02d", mins, secs))
+			} else {
+				*d = FlexibleDuration(fmt.Sprintf("%ds", int(n)))
+			}
+		} else {
+			*d = ""
+		}
+		return nil
+	}
+	*d = FlexibleDuration(strings.Trim(string(b), "\""))
+	return nil
+}
+
+func (d FlexibleDuration) String() string {
+	return string(d)
+}
+
+// FlexibleTime handles dates that might be RFC3339, null, empty strings, or custom camera EXIF formats.
+type FlexibleTime time.Time
+
+func (ft *FlexibleTime) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), "\"")
+	if s == "" || s == "null" || s == "0000:00:00 00:00:00" {
+		*ft = FlexibleTime(time.Time{})
+		return nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		*ft = FlexibleTime(t)
+		return nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		*ft = FlexibleTime(t)
+		return nil
+	}
+	formats := []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006:01:02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, s); err == nil {
+			*ft = FlexibleTime(t)
+			return nil
+		}
+	}
+	*ft = FlexibleTime(time.Time{})
+	return nil
+}
+
+func (ft FlexibleTime) Time() time.Time {
+	return time.Time(ft)
+}
+
+func (ft FlexibleTime) IsZero() bool {
+	return time.Time(ft).IsZero()
+}
+
+func (ft FlexibleTime) Format(layout string) string {
+	if ft.IsZero() {
+		return ""
+	}
+	return time.Time(ft).Format(layout)
+}
 
 type (
 	AssetType       string
@@ -27,27 +121,27 @@ const (
 )
 
 type ExifInfo struct {
-	City             string    `json:"city"`
-	Country          string    `json:"country"`
-	State            string    `json:"state"`
-	DateTimeOriginal time.Time `json:"dateTimeOriginal"`
-	Description      string    `json:"description"`
-	ExifImageHeight  int       `json:"exifImageHeight"`
-	ExifImageWidth   int       `json:"exifImageWidth"`
-	ExposureTime     string    `json:"exposureTime"`
-	FileSizeInByte   int64     `json:"fileSizeInByte"`
-	FNumber          float64   `json:"fNumber"`
-	FocalLength      float64   `json:"focalLength"`
-	Iso              int       `json:"iso"`
-	Latitude         float64   `json:"latitude"`
-	Longitude        float64   `json:"longitude"`
-	LensModel        string    `json:"lensModel"`
-	Make             string    `json:"make"`
-	Model            string    `json:"model"`
-	ModifyDate       time.Time `json:"modifyDate"`
-	Orientation      string    `json:"orientation"`
-	Rating           int       `json:"rating"`
-	TimeZone         string    `json:"timeZone"`
+	City             string       `json:"city"`
+	Country          string       `json:"country"`
+	State            string       `json:"state"`
+	DateTimeOriginal FlexibleTime `json:"dateTimeOriginal"`
+	Description      string       `json:"description"`
+	ExifImageHeight  int          `json:"exifImageHeight"`
+	ExifImageWidth   int          `json:"exifImageWidth"`
+	ExposureTime     string       `json:"exposureTime"`
+	FileSizeInByte   int64        `json:"fileSizeInByte"`
+	FNumber          float64      `json:"fNumber"`
+	FocalLength      float64      `json:"focalLength"`
+	Iso              int          `json:"iso"`
+	Latitude         float64      `json:"latitude"`
+	Longitude        float64      `json:"longitude"`
+	LensModel        string       `json:"lensModel"`
+	Make             string       `json:"make"`
+	Model            string       `json:"model"`
+	ModifyDate       FlexibleTime `json:"modifyDate"`
+	Orientation      string       `json:"orientation"`
+	Rating           int          `json:"rating"`
+	TimeZone         string       `json:"timeZone"`
 }
 
 type Person struct {
@@ -72,19 +166,19 @@ type Album struct {
 }
 
 type Asset struct {
-	ID               string          `json:"id"`
-	Type             AssetType       `json:"type"`
-	OriginalFileName string          `json:"originalFileName"`
-	OriginalMimeType string          `json:"originalMimeType"`
-	LocalDateTime    time.Time       `json:"localDateTime"`
-	IsFavorite       bool            `json:"isFavorite"`
-	IsArchived       bool            `json:"isArchived"`
-	IsTrashed        bool            `json:"isTrashed"`
-	Duration         string          `json:"duration"`
-	Visibility       AssetVisibility `json:"visibility"`
-	ExifInfo         ExifInfo        `json:"exifInfo"`
-	People           []Person        `json:"people"`
-	Tags             []Tag           `json:"tags"`
+	ID               string           `json:"id"`
+	Type             AssetType        `json:"type"`
+	OriginalFileName string           `json:"originalFileName"`
+	OriginalMimeType string           `json:"originalMimeType"`
+	LocalDateTime    FlexibleTime     `json:"localDateTime"`
+	IsFavorite       bool             `json:"isFavorite"`
+	IsArchived       bool             `json:"isArchived"`
+	IsTrashed        bool             `json:"isTrashed"`
+	Duration         FlexibleDuration `json:"duration"`
+	Visibility       AssetVisibility  `json:"visibility"`
+	ExifInfo         ExifInfo         `json:"exifInfo"`
+	People           []Person         `json:"people"`
+	Tags             []Tag            `json:"tags"`
 }
 
 type StringFilter struct {

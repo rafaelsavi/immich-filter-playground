@@ -445,7 +445,12 @@ func (c *Client) CountAssets(ctx context.Context, apiKey string, filter SearchFi
 			return total, false, err
 		}
 
-		var resp SearchMetadataResponse
+		var resp struct {
+			Assets struct {
+				Items      []json.RawMessage `json:"items"`
+				NextCursor string            `json:"nextCursor"`
+			} `json:"assets"`
+		}
 		if err := json.Unmarshal(data, &resp); err != nil {
 			return total, false, err
 		}

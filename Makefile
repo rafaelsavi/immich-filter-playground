@@ -1,7 +1,7 @@
 .PHONY: all build run test clean docker-build help
 
 BINARY_NAME=immich-filter-playground
-VERSION?=1.1.3
+VERSION?=1.1.4
 
 all: test build
 

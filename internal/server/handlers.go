@@ -463,18 +463,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 
-		countG.Go(func() error {
-			c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 5000, includeVideos, includeArchived)
-			if err == nil {
-				countMu.Lock()
-				totalMatching += c
-				if !exact {
-					isExactCount = false
+		if searchMode == "metadata" {
+			countG.Go(func() error {
+				c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 2000, includeVideos, includeArchived)
+				if err == nil {
+					countMu.Lock()
+					totalMatching += c
+					if !exact {
+						isExactCount = false
+					}
+					countMu.Unlock()
 				}
-				countMu.Unlock()
-			}
-			return nil
-		})
+				return nil
+			})
+		}
 	}
 
 	_ = g.Wait()

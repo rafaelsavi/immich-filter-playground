@@ -1,0 +1,14 @@
+.git
+.github
+.vscode
+.idea
+*.exe
+immich-filter-playground
+config.yaml
+config.local.yaml
+.env
+.env.local
+*.log
+dist/
+bin/
+

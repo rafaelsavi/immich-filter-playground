@@ -1,0 +1,43 @@
+# Immich Filter Playground Configuration
+# Copy this file to config.yaml and fill in your Immich URL and API key(s).
+# Any setting here can also be provided or overridden via environment variables.
+
+server:
+  host: "0.0.0.0"
+  port: 8090
+
+immich:
+  # Base URL of your Immich instance (used by the backend server to query Immich)
+  url: "http://localhost:2283"
+
+  # Optional: External URL of your Immich instance (used for "Open in Immich" links in the browser)
+  # Defaults to immich.url if omitted.
+  external_url: ""
+
+  # Default Immich API key (used when querying as the default user)
+  api_key: "your_immich_api_key_here"
+
+  # Optional: Named Immich user accounts for testing filters across specific users or all users
+  accounts:
+    # alice: "api_key_for_alice"
+    # bob: "api_key_for_bob"
+
+  # Optional: Allow insecure/self-signed SSL certificates (default: false)
+  insecure_skip_verify: false
+
+  # Optional: Request timeout in seconds for Immich API calls (default: 45)
+  timeout_seconds: 45
+
+defaults:
+  # Initial sample size in the live preview gallery (24, 48, 96, 144)
+  sample_size: 24
+
+  # Default search endpoint: "random" (/api/search/random) or "metadata" (/api/search/metadata)
+  search_mode: "random"
+
+  # Include videos by default when no explicit media type filter is set
+  include_videos: true
+
+  # Include archived assets by default when no explicit visibility filter is set
+  include_archived: false
+

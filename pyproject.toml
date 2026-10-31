@@ -1,0 +1,23 @@
+[project]
+name = "immich-filter-playground"
+version = "1.0.0"
+description = "Immich Filter Playground: A visual filter designer and testing playground for the Immich Search API v2."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Rafael Savi", email = "rafaelvsavi@gmail.com" },
+]
+keywords = ["immich", "search-api", "filter-designer", "photo-gallery"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: JavaScript",
+    "Programming Language :: Other",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+]
+
+[project.urls]
+Homepage = "https://github.com/rafaelsavi/immich-filter-playground"
+Repository = "https://github.com/rafaelsavi/immich-filter-playground.git"
+Issues = "https://github.com/rafaelsavi/immich-filter-playground/issues"

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<!-- MANDATORY: Declare support for both light and dark themes -->
+	<meta name="color-scheme" content="light dark">
+	<title>Immich Filter Playground — Search API v2</title>
+	<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+	<div class="app-shell">
+		<!-- Top Header Bar -->
+		<header class="topbar">
+			<div class="topbar-brand">
+				<div class="brand-logo" aria-hidden="true">⚡</div>
+				<div>
+					<h1>Immich Filter Playground</h1>
+					<p class="pretty-text">Build nested Search API v2 filters, inspect live JSON, and preview matching assets in real time.</p>
+				</div>
+			</div>
+
+			<div class="topbar-controls">
+				<div class="connection-pill" id="connection-status" title="Immich Server Status">
+					<span class="status-dot" id="connection-dot"></span>
+					<span id="connection-label">Connecting...</span>
+				</div>
+
+				<div class="account-selector-wrap" id="account-selector-wrap" hidden>
+					<label for="account-select">Account:</label>
+					<select id="account-select" aria-label="Target Immich Account">
+						<option value="">All Accounts</option>
+					</select>
+				</div>
+
+				<button type="button" class="btn btn-secondary" id="btn-refresh-meta" title="Reload People, Albums, Tags, and Locations from Immich">
+					<span>↻ Metadata</span>
+				</button>
+
+				<div class="theme-switcher" role="group" aria-label="Color Theme">
+					<button type="button" class="theme-btn active" data-theme="auto" title="System theme">Auto</button>
+					<button type="button" class="theme-btn" data-theme="light" title="Light theme">☀️</button>
+					<button type="button" class="theme-btn" data-theme="dark" title="Dark theme">🌙</button>
+				</div>
+			</div>
+		</header>
+
+		<!-- Warning banner if unconfigured or partial metadata warnings -->
+		<div id="global-warning-banner" class="alert alert-warning" hidden role="status"></div>
+
+		<!-- Main Two-Column Workspace -->
+		<main class="workspace-grid">
+			<!-- Left Column: Visual Nested Rule Tree + Simultaneous Live JSON Editor -->
+			<section class="builder-column" aria-label="Filter Builder and JSON Inspector">
+				<!-- Card 1: Visual Nested Rule Tree -->
+				<div class="panel-card">
+					<div class="panel-header">
+						<div class="panel-title-group">
+							<h2>🌲 Nested Rule Tree</h2>
+							<span class="panel-subtitle">Combine AND / OR groups at any depth</span>
+						</div>
+						<div class="panel-actions">
+							<div class="preset-group">
+								<span class="preset-label">Presets:</span>
+								<button type="button" class="btn btn-xs btn-ghost" data-preset="favorites">⭐ Favorites</button>
+								<button type="button" class="btn btn-xs btn-ghost" data-preset="nested-or">🔀 Nested OR</button>
+								<button type="button" class="btn btn-xs btn-ghost" data-preset="Clear">🗑️ Clear</button>
+							</div>
+						</div>
+					</div>
+
+					<div id="rule-tree-mount" class="rule-tree-container"></div>
+				</div>
+
+				<!-- Card 2: Live JSON Editor & API Payload (Always visible below the tree!) -->
+				<div class="panel-card json-card">
+					<div class="json-tabs-bar">
+						<div class="json-tabs" role="tablist" aria-label="Code Output Format">
+							<button type="button" role="tab" aria-selected="true" class="json-tab-btn active" data-code-tab="filter">
+								⚡ Filter JSON
+							</button>
+							<button type="button" role="tab" aria-selected="false" class="json-tab-btn" data-code-tab="request">
+								📦 Request Body
+							</button>
+							<button type="button" role="tab" aria-selected="false" class="json-tab-btn" data-code-tab="curl">
+								💻 cURL
+							</button>
+						</div>
+
+						<div class="json-toolbar-actions">
+							<span id="json-sync-badge" class="sync-badge sync-valid">✓ Synced with Tree</span>
+							<button type="button" class="btn btn-xs btn-secondary" id="btn-format-json" title="Prettify JSON">
+								Format
+							</button>
+							<button type="button" class="btn btn-xs btn-secondary" id="btn-copy-code" title="Copy current code to clipboard">
+								Copy
+							</button>
+							<button type="button" class="btn btn-xs btn-primary" id="btn-apply-json" title="Parse JSON into the Visual Rule Tree and run search (Ctrl+Enter)">
+								Apply to Tree ↵
+							</button>
+						</div>
+					</div>
+
+					<!-- Editable Filter JSON Pane -->
+					<div id="code-pane-filter" class="code-pane active">
+						<div class="code-editor-wrapper" id="json-editor-box">
+							<textarea
+								id="filter-json-editor"
+								class="code-textarea"
+								rows="12"
+								spellcheck="false"
+								autocomplete="off"
+								aria-label="Search API v2 Filter JSON Editor"
+								placeholder="{}"
+							></textarea>
+						</div>
+						<div class="code-footer-hint">
+							<span>💡 Two-way editor: changes in the Rule Tree update this JSON live. Edit or paste JSON here and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or click <strong>Apply to Tree</strong>).</span>
+						</div>
+					</div>
+
+					<!-- Read-only Full Request Body Pane -->
+					<div id="code-pane-request" class="code-pane" hidden>
+						<div class="code-editor-wrapper">
+							<textarea
+								id="request-body-viewer"
+								class="code-textarea"
+								rows="12"
+								readonly
+								spellcheck="false"
+								aria-label="Full Immich Search API Request Body"
+							></textarea>
+						</div>
+						<div class="code-footer-hint">
+							<span>Full JSON payload sent to <code id="endpoint-hint-label">POST /api/search/random</code>.</span>
+						</div>
+					</div>
+
+					<!-- Read-only cURL Command Pane -->
+					<div id="code-pane-curl" class="code-pane" hidden>
+						<div class="code-editor-wrapper">
+							<textarea
+								id="curl-viewer"
+								class="code-textarea"
+								rows="12"
+								readonly
+								spellcheck="false"
+								aria-label="cURL Command"
+							></textarea>
+						</div>
+						<div class="code-footer-hint">
+							<span>Ready-to-run cURL snippet (replace <code>$IMMICH_API_KEY</code> with your API key).</span>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- Right Column: Sticky Live Asset Results -->
+			<section class="results-column scroller" aria-label="Live Immich Asset Results">
+				<div class="panel-card results-card">
+					<!-- Results Toolbar -->
+					<div class="results-header">
+						<div class="results-title-row">
+							<div class="results-heading">
+								<h2>🖼️ Live Assets</h2>
+								<span id="results-count-badge" class="count-badge">Loading...</span>
+							</div>
+
+							<div class="results-mode-controls">
+								<div class="segmented-control" role="group" aria-label="Search Endpoint Mode">
+									<button type="button" class="seg-btn active" data-search-mode="random" title="POST /api/search/random">
+										🎲 Random
+									</button>
+									<button type="button" class="seg-btn" data-search-mode="metadata" title="POST /api/search/metadata">
+										📑 Metadata
+									</button>
+								</div>
+
+								<button type="button" class="btn btn-sm btn-secondary" id="btn-reshuffle" title="Fetch a new random sample with the current filter">
+									🎲 Reshuffle
+								</button>
+
+								<select id="metadata-sort-select" class="sort-select" hidden aria-label="Sort Metadata Results">
+									<option value="takenAt:desc">Taken Date (Newest)</option>
+									<option value="takenAt:asc">Taken Date (Oldest)</option>
+									<option value="createdAt:desc">Created Date (Newest)</option>
+									<option value="createdAt:asc">Created Date (Oldest)</option>
+								</select>
+							</div>
+						</div>
+
+						<div class="results-subtoolbar">
+							<div class="toggle-filters">
+								<label class="checkbox-pill">
+									<input type="checkbox" id="toggle-include-videos" checked>
+									<span>Include Videos</span>
+								</label>
+								<label class="checkbox-pill">
+									<input type="checkbox" id="toggle-include-archived">
+									<span>Include Archived</span>
+								</label>
+							</div>
+
+							<div class="limit-selector">
+								<span class="limit-label">Sample:</span>
+								<button type="button" class="limit-pill active" data-limit="24">24</button>
+								<button type="button" class="limit-pill" data-limit="48">48</button>
+								<button type="button" class="limit-pill" data-limit="96">96</button>
+								<button type="button" class="limit-pill" data-limit="144">144</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- Error / Empty / Loading States -->
+					<div id="results-error" class="alert alert-error" hidden role="alert"></div>
+					<div id="results-empty" class="empty-state" hidden>
+						<div class="empty-icon" aria-hidden="true">🔍</div>
+						<h3>No Matching Assets</h3>
+						<p class="pretty-text">No photos or videos in Immich matched your current filter rules. Try loosening a condition or switching an AND group to OR.</p>
+					</div>
+
+					<!-- Asset Thumbnail Grid -->
+					<div id="assets-grid" class="assets-grid"></div>
+
+					<!-- Load More Footer -->
+					<div id="load-more-wrap" class="load-more-wrap" hidden>
+						<button type="button" class="btn btn-secondary" id="btn-load-more">
+							Load More Assets (+24)
+						</button>
+					</div>
+				</div>
+			</section>
+		</main>
+	</div>
+
+	<!-- Asset Detail Lightbox Modal -->
+	<!-- MANDATORY: Use closedby="any" to enable light-dismiss behavior -->
+	<dialog id="asset-dialog" closedby="any" aria-labelledby="asset-dialog-title">
+		<div class="dialog-content">
+			<div class="dialog-header">
+				<h3 id="asset-dialog-title">Asset Details</h3>
+				<form method="dialog">
+					<button type="submit" class="btn-icon" aria-label="Close modal">✕</button>
+				</form>
+			</div>
+			<div class="dialog-body" id="asset-dialog-body"></div>
+		</div>
+	</dialog>
+
+	<script src="/app.js"></script>
+</body>
+</html>
+

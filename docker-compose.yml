@@ -1,0 +1,30 @@
+services:
+  immich-filter-playground:
+    # image: ghcr.io/<owner>/immich-filter-playground:latest
+    build: .
+    container_name: immich-filter-playground
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      # Immich Server Connection
+      - IMMICH_URL=http://immich-server:2283
+      - IMMICH_EXTERNAL_URL=https://photos.example.com # Optional: Public URL for browser links
+      - IMMICH_API_KEY=your_immich_api_key_here
+
+      # Optional: Named accounts (user1:key1,user2:key2)
+      # - IMMICH_ACCOUNTS=alice:key1,bob:key2
+
+      # Optional: Skip TLS verification for self-signed certificates
+      # - IMMICH_INSECURE_SKIP_VERIFY=true
+
+      # Defaults
+      - PLAYGROUND_SAMPLE_SIZE=24
+      - PLAYGROUND_SEARCH_MODE=random
+      - PLAYGROUND_INCLUDE_VIDEOS=true
+      - PLAYGROUND_INCLUDE_ARCHIVED=false
+
+    # Alternatively, mount a config.yaml instead of environment variables:
+    # volumes:
+    #   - ./config.yaml:/app/config.yaml:ro
+

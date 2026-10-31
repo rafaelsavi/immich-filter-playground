@@ -1,0 +1,39 @@
+# Compiled binaries & artifacts
+immich-filter-playground
+immich-filter-playground.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+bin/
+dist/
+
+# Local configuration with secrets & private keys
+config.yaml
+config.local.yaml
+config.*.yaml
+!config.example.yaml
+.env
+.env.local
+.env.*
+!.env.example
+
+# Test & coverage artifacts
+*.test
+*.prof
+coverage.txt
+coverage.out
+
+# Logs
+*.log
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+

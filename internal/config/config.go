@@ -26,8 +26,9 @@ type Config struct {
 
 // ServerConfig configures the HTTP server.
 type ServerConfig struct {
-	Host string `yaml:"host" json:"host"`
-	Port int    `yaml:"port" json:"port"`
+	Host         string `yaml:"host" json:"host"`
+	Port         int    `yaml:"port" json:"port"`
+	ProfilesFile string `yaml:"profiles_file,omitempty" json:"-"`
 }
 
 // ImmichConfig configures the connection and credentials for Immich.
@@ -52,8 +53,9 @@ type DefaultsConfig struct {
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host: "0.0.0.0",
-			Port: 8090,
+			Host:         "0.0.0.0",
+			Port:         8090,
+			ProfilesFile: "profiles.json",
 		},
 		Immich: ImmichConfig{
 			Accounts:       make(map[string]string),
@@ -132,6 +134,9 @@ func (c *Config) applyEnvOverrides() {
 			c.Server.Port = p
 		}
 	}
+	if pf := firstNonEmptyEnv("PLAYGROUND_PROFILES_FILE", "PROFILES_FILE"); pf != "" {
+		c.Server.ProfilesFile = pf
+	}
 
 	if u := firstNonEmptyEnv("IMMICH_URL"); u != "" {
 		c.Immich.URL = u
@@ -206,6 +211,10 @@ func (c *Config) applyEnvOverrides() {
 }
 
 func (c *Config) normalize() {
+	if c.Server.ProfilesFile == "" {
+		c.Server.ProfilesFile = "profiles.json"
+	}
+
 	c.Immich.URL = strings.TrimRight(strings.TrimSpace(c.Immich.URL), "/")
 	c.Immich.ExternalURL = strings.TrimRight(strings.TrimSpace(c.Immich.ExternalURL), "/")
 	c.Immich.APIKey = strings.TrimSpace(c.Immich.APIKey)

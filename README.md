@@ -16,6 +16,12 @@ A modern, standalone visual filter designer and testing playground for the **Imm
   - Automatically compiles and normalizes nested criteria into valid Immich Search API v2 `SearchFilter` JSON.
   - Live auto-complete and dropdown options populated dynamically from your own Immich instance (People, Albums, Tags, Countries, States, Cities, Cameras, Makes, and Lenses).
 
+- **📁 Search Profiles & Quick Switching**:
+  - Save your favourite search filters and query parameters into named profiles.
+  - Quick-switch between custom profiles and built-in presets (e.g. ⭐ Favorites, 🔀 Nested OR, 🎬 Recent Videos, 🌟 Top Rated) via a dedicated dropdown.
+  - Profiles remember rule trees, search modes, target user accounts, sort settings, and video/archive options.
+  - Synchronized via backend API (`/api/profiles`) with seamless local browser persistence fallback.
+
 - **⚡ Simultaneous Two-Way JSON Editor**:
   - Live bi-directional synchronization: click rules in the visual tree and watch the Filter JSON update instantaneously.
   - Paste or edit raw JSON directly in the editor and press `Ctrl+Enter` (**Apply to Tree**) to dynamically parse and reconstruct the visual tree.
@@ -148,6 +154,9 @@ The backend provides a lightweight REST API for the frontend and health checks:
 - `GET /api/bootstrap`: Returns server configuration status, user list, and preloaded Immich metadata (People, Albums, Tags, Locations).
 - `POST /api/metadata/refresh`: Flushes internal metadata cache and reloads entities from Immich.
 - `POST /api/search`: Executes the normalized Immich search query and returns matched asset items.
+- `GET /api/profiles`: Lists saved search profiles.
+- `POST /api/profiles`: Creates or updates a search profile.
+- `DELETE /api/profiles/{id}`: Deletes a saved search profile.
 - `GET /api/media/{thumbnail|preview|original}/{id}`: Authenticated media proxy streaming assets without exposing credentials to the browser.
 
 ---

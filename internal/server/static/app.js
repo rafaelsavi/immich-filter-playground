@@ -14,6 +14,8 @@ const state = {
 	includeVideos: true,
 	includeArchived: false,
 	activeCodeTab: 'filter',
+	profiles: [],
+	activeProfileId: '',
 	metadata: {
 		people: [],
 		albums: [],
@@ -1238,6 +1240,7 @@ async function bootstrapApp() {
 		updateConnectionBanner(data);
 		populateAccountsSelector();
 		syncToolbarControls();
+		await loadProfiles();
 
 		// Initialize Rule Tree from ?filter= or default starter rule
 		if (initialFilter && initialFilter.trim() !== '' && initialFilter.trim() !== '{}') {
@@ -1320,7 +1323,12 @@ function syncToolbarControls() {
 	const reshuffleBtn = document.getElementById('btn-reshuffle');
 	const sortSelect = document.getElementById('metadata-sort-select');
 	if (reshuffleBtn) reshuffleBtn.hidden = (state.searchMode !== 'random');
-	if (sortSelect) sortSelect.hidden = (state.searchMode !== 'metadata');
+	if (sortSelect) {
+		sortSelect.hidden = (state.searchMode !== 'metadata');
+		if (state.orderByField) {
+			sortSelect.value = `${state.orderByField}:${state.orderByDirection}`;
+		}
+	}
 
 	document.querySelectorAll('.limit-pill').forEach(btn => {
 		btn.classList.toggle('active', parseInt(btn.dataset.limit, 10) === state.sampleSize);
@@ -1355,11 +1363,19 @@ function applyJsonEditorToTree() {
 	}
 }
 
-function applyPreset(presetName) {
-	if (presetName === 'Clear') {
-		state.ruleTree = { id: 'root', type: 'group', combiner: 'AND', children: [] };
-	} else if (presetName === 'favorites') {
-		state.ruleTree = {
+// ==========================================================================
+// Search Profiles & Presets
+// ==========================================================================
+
+const DEFAULT_PRESETS = [
+	{
+		id: 'preset:favorites',
+		name: '⭐ Favorites (Photos)',
+		isPreset: true,
+		searchMode: 'random',
+		includeVideos: false,
+		includeArchived: false,
+		buildTree: () => ({
 			id: 'root',
 			type: 'group',
 			combiner: 'AND',
@@ -1367,30 +1383,313 @@ function applyPreset(presetName) {
 				{ id: generateNodeId('r'), type: 'rule', field: 'favorite', operator: 'true', value: true },
 				{ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'IMAGE', value: 'IMAGE' }
 			]
-		};
-	} else if (presetName === 'nested-or') {
-		const sampleCountries = state.metadata.countries.slice(0, 2);
-		const samplePeople = state.metadata.people.slice(0, 1).map(p => p.id);
-		state.ruleTree = {
+		})
+	},
+	{
+		id: 'preset:nested-or',
+		name: '🔀 Nested OR (Places/People)',
+		isPreset: true,
+		searchMode: 'random',
+		includeVideos: true,
+		includeArchived: false,
+		buildTree: () => {
+			const sampleCountries = state.metadata.countries.slice(0, 2);
+			const samplePeople = state.metadata.people.slice(0, 1).map(p => p.id);
+			return {
+				id: 'root',
+				type: 'group',
+				combiner: 'AND',
+				children: [
+					{ id: generateNodeId('r'), type: 'rule', field: 'favorite', operator: 'true', value: true },
+					{
+						id: generateNodeId('g'),
+						type: 'group',
+						combiner: 'OR',
+						children: [
+							{ id: generateNodeId('r'), type: 'rule', field: 'country', operator: 'in', value: sampleCountries },
+							{ id: generateNodeId('r'), type: 'rule', field: 'people', operator: 'any', value: samplePeople }
+						]
+					}
+				]
+			};
+		}
+	},
+	{
+		id: 'preset:videos',
+		name: '🎬 Recent Videos',
+		isPreset: true,
+		searchMode: 'metadata',
+		orderByField: 'takenAt',
+		orderByDirection: 'desc',
+		includeVideos: true,
+		includeArchived: false,
+		buildTree: () => ({
 			id: 'root',
 			type: 'group',
 			combiner: 'AND',
 			children: [
-				{ id: generateNodeId('r'), type: 'rule', field: 'favorite', operator: 'true', value: true },
-				{
-					id: generateNodeId('g'),
-					type: 'group',
-					combiner: 'OR',
-					children: [
-						{ id: generateNodeId('r'), type: 'rule', field: 'country', operator: 'in', value: sampleCountries },
-						{ id: generateNodeId('r'), type: 'rule', field: 'people', operator: 'any', value: samplePeople }
-					]
-				}
+				{ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'VIDEO', value: 'VIDEO' }
 			]
-		};
+		})
+	},
+	{
+		id: 'preset:top-rated',
+		name: '🌟 Top Rated (4+ Stars)',
+		isPreset: true,
+		searchMode: 'metadata',
+		orderByField: 'rating',
+		orderByDirection: 'desc',
+		includeVideos: true,
+		includeArchived: false,
+		buildTree: () => ({
+			id: 'root',
+			type: 'group',
+			combiner: 'AND',
+			children: [
+				{ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'gte', value: 4 }
+			]
+		})
+	},
+	{
+		id: 'preset:clear',
+		name: '🗑️ Clear / Blank',
+		isPreset: true,
+		searchMode: 'random',
+		includeVideos: true,
+		includeArchived: false,
+		buildTree: () => ({ id: 'root', type: 'group', combiner: 'AND', children: [] })
 	}
-	renderRuleTree();
-	syncFromRuleTree();
+];
+
+async function loadProfiles() {
+	let serverProfiles = [];
+	try {
+		const resp = await fetch('/api/profiles');
+		if (resp.ok) {
+			const data = await resp.json();
+			if (Array.isArray(data.profiles)) {
+				serverProfiles = data.profiles;
+			}
+		}
+	} catch (err) {
+		console.warn('Could not fetch profiles from server, falling back to localStorage:', err);
+	}
+
+	let localProfiles = [];
+	try {
+		const stored = localStorage.getItem('immich_search_profiles');
+		if (stored) {
+			localProfiles = JSON.parse(stored);
+		}
+	} catch (e) {}
+
+	const profileMap = new Map();
+	for (const p of localProfiles) {
+		if (p && p.id) profileMap.set(p.id, p);
+	}
+	for (const p of serverProfiles) {
+		if (p && p.id) profileMap.set(p.id, p);
+	}
+
+	state.profiles = Array.from(profileMap.values());
+	renderProfilesDropdown();
+}
+
+function renderProfilesDropdown() {
+	const optgroup = document.getElementById('saved-profiles-optgroup');
+	const selectEl = document.getElementById('profile-select');
+	const deleteBtn = document.getElementById('btn-delete-profile');
+	if (!optgroup || !selectEl) return;
+
+	optgroup.innerHTML = '';
+	if (state.profiles.length === 0) {
+		optgroup.style.display = 'none';
+	} else {
+		optgroup.style.display = '';
+		for (const p of state.profiles) {
+			const opt = document.createElement('option');
+			opt.value = p.id;
+			opt.textContent = `💾 ${p.name}`;
+			optgroup.appendChild(opt);
+		}
+	}
+
+	selectEl.value = state.activeProfileId || '';
+	if (deleteBtn) {
+		deleteBtn.hidden = !(state.activeProfileId && state.activeProfileId.startsWith('prof_'));
+	}
+}
+
+function applyProfile(profileId) {
+	state.activeProfileId = profileId;
+	const deleteBtn = document.getElementById('btn-delete-profile');
+	const selectEl = document.getElementById('profile-select');
+	if (selectEl) selectEl.value = profileId;
+
+	if (deleteBtn) {
+		deleteBtn.hidden = !(profileId && profileId.startsWith('prof_'));
+	}
+
+	if (!profileId) {
+		return;
+	}
+
+	// Check presets
+	const preset = DEFAULT_PRESETS.find(p => p.id === profileId || p.id === `preset:${profileId}` || (profileId === 'Clear' && p.id === 'preset:clear'));
+	if (preset) {
+		state.ruleTree = preset.buildTree();
+		if (preset.searchMode) state.searchMode = preset.searchMode;
+		if (preset.orderByField) state.orderByField = preset.orderByField;
+		if (preset.orderByDirection) state.orderByDirection = preset.orderByDirection;
+		if (preset.includeVideos !== undefined) state.includeVideos = preset.includeVideos;
+		if (preset.includeArchived !== undefined) state.includeArchived = preset.includeArchived;
+		syncToolbarControls();
+		renderRuleTree();
+		syncFromRuleTree();
+		return;
+	}
+
+	// Check custom saved profiles
+	const prof = state.profiles.find(p => p.id === profileId);
+	if (prof) {
+		if (prof.ruleTree && typeof prof.ruleTree === 'object') {
+			state.ruleTree = JSON.parse(JSON.stringify(prof.ruleTree));
+		} else if (prof.filterJson) {
+			try {
+				const ast = JSON.parse(prof.filterJson);
+				const group = astToRuleGroup(ast);
+				if (group) state.ruleTree = group;
+			} catch (e) {
+				console.warn('Error parsing profile filterJson:', e);
+			}
+		}
+
+		if (prof.searchMode) state.searchMode = prof.searchMode;
+		if (prof.orderByField) state.orderByField = prof.orderByField;
+		if (prof.orderByDirection) state.orderByDirection = prof.orderByDirection;
+		if (prof.limit && prof.limit > 0) state.sampleSize = prof.limit;
+		if (prof.includeVideos !== undefined) state.includeVideos = !!prof.includeVideos;
+		if (prof.includeArchived !== undefined) state.includeArchived = !!prof.includeArchived;
+		if (prof.user !== undefined) {
+			state.selectedUser = prof.user;
+			const accSelect = document.getElementById('account-select');
+			if (accSelect) accSelect.value = prof.user;
+		}
+
+		syncToolbarControls();
+		renderRuleTree();
+		syncFromRuleTree();
+	}
+}
+
+function openSaveProfileModal() {
+	const dialog = document.getElementById('save-profile-dialog');
+	const nameInput = document.getElementById('save-profile-name');
+	if (!dialog || !nameInput) return;
+
+	let currentName = '';
+	if (state.activeProfileId && state.activeProfileId.startsWith('prof_')) {
+		const cur = state.profiles.find(p => p.id === state.activeProfileId);
+		if (cur) currentName = cur.name;
+	}
+	nameInput.value = currentName;
+
+	const modeEl = document.getElementById('profile-summary-mode');
+	const userEl = document.getElementById('profile-summary-user');
+	const togglesEl = document.getElementById('profile-summary-toggles');
+
+	if (modeEl) modeEl.textContent = `⚡ Search Mode: ${state.searchMode === 'metadata' ? 'Metadata' : 'Random'}` + (state.searchMode === 'metadata' ? ` (${state.orderByField} ${state.orderByDirection.toUpperCase()})` : '');
+	if (userEl) userEl.textContent = `👤 Account: ${state.selectedUser ? `@${state.selectedUser}` : 'All Accounts'}`;
+	if (togglesEl) togglesEl.textContent = `🎬 Videos: ${state.includeVideos ? 'Included' : 'Excluded'}, Archived: ${state.includeArchived ? 'Included' : 'Excluded'}, Sample: ${state.sampleSize}`;
+
+	dialog.showModal();
+	setTimeout(() => nameInput.focus(), 50);
+}
+
+async function handleSaveProfileSubmit(e) {
+	e.preventDefault();
+	const nameInput = document.getElementById('save-profile-name');
+	const dialog = document.getElementById('save-profile-dialog');
+	const name = nameInput ? nameInput.value.trim() : '';
+	if (!name) return;
+
+	const filterEditor = document.getElementById('filter-json-editor');
+	const rawFilterJson = filterEditor ? filterEditor.value : '{}';
+
+	const id = (state.activeProfileId && state.activeProfileId.startsWith('prof_')) ? state.activeProfileId : '';
+	const profileData = {
+		id: id,
+		name: name,
+		filterJson: rawFilterJson,
+		ruleTree: state.ruleTree,
+		searchMode: state.searchMode,
+		user: state.selectedUser,
+		limit: state.sampleSize,
+		orderByField: state.orderByField,
+		orderByDirection: state.orderByDirection,
+		includeVideos: state.includeVideos,
+		includeArchived: state.includeArchived
+	};
+
+	try {
+		const resp = await fetch('/api/profiles', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(profileData)
+		});
+		if (resp.ok) {
+			const data = await resp.json();
+			if (data.profile) {
+				profileData.id = data.profile.id;
+			}
+		}
+	} catch (err) {
+		console.warn('Saving profile to server failed, using local storage:', err);
+		if (!profileData.id) {
+			profileData.id = 'prof_' + Date.now();
+		}
+	}
+
+	const idx = state.profiles.findIndex(p => p.id === profileData.id);
+	if (idx >= 0) {
+		state.profiles[idx] = profileData;
+	} else {
+		state.profiles.push(profileData);
+	}
+
+	try {
+		localStorage.setItem('immich_search_profiles', JSON.stringify(state.profiles));
+	} catch (e) {}
+
+	state.activeProfileId = profileData.id;
+	if (dialog) dialog.close();
+	renderProfilesDropdown();
+}
+
+async function handleDeleteProfile() {
+	if (!state.activeProfileId || !state.activeProfileId.startsWith('prof_')) return;
+	const prof = state.profiles.find(p => p.id === state.activeProfileId);
+	const name = prof ? prof.name : 'this profile';
+	if (!confirm(`Are you sure you want to delete profile "${name}"?`)) {
+		return;
+	}
+
+	const idToDelete = state.activeProfileId;
+	try {
+		await fetch(`/api/profiles/${encodeURIComponent(idToDelete)}`, {
+			method: 'DELETE'
+		});
+	} catch (err) {
+		console.warn('Delete profile from server error:', err);
+	}
+
+	state.profiles = state.profiles.filter(p => p.id !== idToDelete);
+	try {
+		localStorage.setItem('immich_search_profiles', JSON.stringify(state.profiles));
+	} catch (e) {}
+
+	state.activeProfileId = '';
+	renderProfilesDropdown();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1451,9 +1750,38 @@ document.addEventListener('DOMContentLoaded', () => {
 		});
 	}
 
-	// Presets
+	// Search Profiles
+	const profileSelect = document.getElementById('profile-select');
+	if (profileSelect) {
+		profileSelect.addEventListener('change', (e) => applyProfile(e.target.value));
+	}
+
+	const saveProfileBtn = document.getElementById('btn-save-profile');
+	if (saveProfileBtn) {
+		saveProfileBtn.addEventListener('click', () => openSaveProfileModal());
+	}
+
+	const deleteProfileBtn = document.getElementById('btn-delete-profile');
+	if (deleteProfileBtn) {
+		deleteProfileBtn.addEventListener('click', () => handleDeleteProfile());
+	}
+
+	const saveProfileForm = document.getElementById('save-profile-form');
+	if (saveProfileForm) {
+		saveProfileForm.addEventListener('submit', handleSaveProfileSubmit);
+	}
+
+	const cancelSaveProfileBtn = document.getElementById('btn-cancel-save-profile');
+	if (cancelSaveProfileBtn) {
+		cancelSaveProfileBtn.addEventListener('click', () => {
+			const dialog = document.getElementById('save-profile-dialog');
+			if (dialog) dialog.close();
+		});
+	}
+
+	// Legacy Presets buttons fallback
 	document.querySelectorAll('[data-preset]').forEach(btn => {
-		btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+		btn.addEventListener('click', () => applyProfile(btn.dataset.preset));
 	});
 
 	// Code Tabs (Filter JSON / Request Body / cURL)

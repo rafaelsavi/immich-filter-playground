@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.1.0] - 2026-10-31
+
+### Added
+- **Search Profiles & Quick Switching**: Save filter trees, accounts, sort settings, and toggle options into named profiles.
+- **Profiles Dropdown**: Fast switching between saved profiles directly from the top navigation bar.
+- **Backend Profile Persistence**: Added `/api/profiles` REST endpoints with local JSON file storage and localStorage browser fallback.
+
 ## [1.0.0] - 2026-10-31
 
 Initial standalone release of Immich Filter Playground.

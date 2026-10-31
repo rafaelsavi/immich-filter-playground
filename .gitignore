@@ -19,6 +19,8 @@ config.*.yaml
 .env.local
 .env.*
 !.env.example
+profiles.json
+profiles.*.json
 
 # Test & coverage artifacts
 *.test

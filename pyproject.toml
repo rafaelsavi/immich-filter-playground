@@ -1,6 +1,6 @@
 [project]
 name = "immich-filter-playground"
-version = "1.0.0"
+version = "1.1.0"
 description = "Immich Filter Playground: A visual filter designer and testing playground for the Immich Search API v2."
 readme = "README.md"
 license = { text = "MIT" }

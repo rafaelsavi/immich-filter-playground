@@ -60,11 +60,28 @@
 							<span class="panel-subtitle">Combine AND / OR groups at any depth</span>
 						</div>
 						<div class="panel-actions">
-							<div class="preset-group">
-								<span class="preset-label">Presets:</span>
-								<button type="button" class="btn btn-xs btn-ghost" data-preset="favorites">⭐ Favorites</button>
-								<button type="button" class="btn btn-xs btn-ghost" data-preset="nested-or">🔀 Nested OR</button>
-								<button type="button" class="btn btn-xs btn-ghost" data-preset="Clear">🗑️ Clear</button>
+							<div class="profile-toolbar" role="group" aria-label="Search Profiles">
+								<label for="profile-select" class="profile-label">⚡ Profile:</label>
+								<select id="profile-select" class="profile-select" aria-label="Search Profile">
+									<option value="">Custom Filter</option>
+									<optgroup label="Default Presets" id="preset-profiles-optgroup">
+										<option value="preset:favorites">⭐ Favorites (Photos)</option>
+										<option value="preset:nested-or">🔀 Nested OR (Places/People)</option>
+										<option value="preset:videos">🎬 Recent Videos</option>
+										<option value="preset:top-rated">🌟 Top Rated (4+ Stars)</option>
+										<option value="preset:clear">🗑️ Clear / Blank</option>
+									</optgroup>
+									<optgroup label="Saved Profiles" id="saved-profiles-optgroup">
+										<!-- Populated dynamically -->
+									</optgroup>
+								</select>
+
+								<button type="button" class="btn btn-xs btn-secondary" id="btn-save-profile" title="Save current search criteria as a profile">
+									<span>💾 Save</span>
+								</button>
+								<button type="button" class="btn btn-xs btn-ghost text-danger" id="btn-delete-profile" title="Delete selected custom profile" hidden>
+									<span>🗑️</span>
+								</button>
 							</div>
 						</div>
 					</div>
@@ -232,6 +249,37 @@
 			</section>
 		</main>
 	</div>
+
+	<!-- Save Profile Dialog -->
+	<dialog id="save-profile-dialog" closedby="any" aria-labelledby="save-profile-dialog-title">
+		<div class="dialog-content save-profile-content">
+			<div class="dialog-header">
+				<h3 id="save-profile-dialog-title">💾 Save Search Profile</h3>
+				<form method="dialog">
+					<button type="submit" class="btn-icon" aria-label="Close modal">✕</button>
+				</form>
+			</div>
+			<form id="save-profile-form" class="dialog-body">
+				<div class="form-group">
+					<label for="save-profile-name" class="form-label">Profile Name</label>
+					<input type="text" id="save-profile-name" class="form-input" placeholder="e.g. Summer Vacation, 4K Drone Videos..." required autocomplete="off">
+				</div>
+				<div class="profile-options-summary">
+					<div class="profile-summary-header">Settings to save with this profile:</div>
+					<ul class="profile-summary-list">
+						<li>🌲 Current Rule Tree & Filter JSON criteria</li>
+						<li id="profile-summary-mode">⚡ Search Mode</li>
+						<li id="profile-summary-user">👤 Target Account</li>
+						<li id="profile-summary-toggles">🎬 Media & Visibility Settings</li>
+					</ul>
+				</div>
+				<div class="dialog-actions">
+					<button type="button" class="btn btn-secondary" id="btn-cancel-save-profile">Cancel</button>
+					<button type="submit" class="btn btn-primary" id="btn-confirm-save-profile">Save Profile</button>
+				</div>
+			</form>
+		</div>
+	</dialog>
 
 	<!-- Asset Detail Lightbox Modal -->
 	<!-- MANDATORY: Use closedby="any" to enable light-dismiss behavior -->

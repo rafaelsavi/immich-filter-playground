@@ -156,3 +156,69 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	defer os.Remove(cfg.Server.ProfilesFile)
 }
 
+
+
+func TestBootstrapWithMultipleAccounts(t *testing.T) {
+	mockImmich := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		key := r.Header.Get("x-api-key")
+		switch r.URL.Path {
+		case "/api/people":
+			if key == "bad-key" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"message":"Unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"people":[{"id":"p-1","name":"Alice"}]}`))
+		case "/api/albums":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/tags":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/search/cities":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockImmich.Close()
+
+	cfg := config.Default()
+	cfg.Server.ProfilesFile = filepath.Join(t.TempDir(), "test_profiles.json")
+	cfg.Immich.URL = mockImmich.URL
+	cfg.Immich.Accounts = config.FlexibleAccounts{
+		"alice": "good-key",
+		"bob":   "bad-key",
+	}
+
+	srv := New(cfg)
+
+	reqBoot := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	recBoot := httptest.NewRecorder()
+	srv.ServeHTTP(recBoot, reqBoot)
+
+	if recBoot.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/bootstrap, got %d", recBoot.Code)
+	}
+	var bootResp bootstrapResponse
+	if err := json.Unmarshal(recBoot.Body.Bytes(), &bootResp); err != nil {
+		t.Fatalf("unmarshaling bootstrap response: %v", err)
+	}
+
+	if len(bootResp.Accounts) != 2 {
+		t.Fatalf("expected 2 accounts, got %v", bootResp.Accounts)
+	}
+	if len(bootResp.AccountDetails) != 2 {
+		t.Fatalf("expected 2 account details, got %+v", bootResp.AccountDetails)
+	}
+
+	health := make(map[string]bool)
+	for _, d := range bootResp.AccountDetails {
+		health[d.Name] = d.Valid
+	}
+	if !health["alice"] {
+		t.Errorf("expected alice to be valid")
+	}
+	if health["bob"] {
+		t.Errorf("expected bob to be invalid due to 401")
+	}
+}

@@ -1,5 +1,5 @@
 # Immich Filter Playground Configuration
-# Copy this file to config.yaml and fill in your Immich URL and API key(s).
+# Copy this file to config.yaml and fill in your Immich URL and account API key(s).
 # Any setting here can also be provided or overridden via environment variables.
 
 server:
@@ -14,12 +14,13 @@ immich:
   # Defaults to immich.url if omitted.
   external_url: ""
 
-  # Default Immich API key (used when querying as the default user)
-  api_key: "your_immich_api_key_here"
-
-  # Optional: Named Immich user accounts for testing filters across specific users or all users
+  # Immich user account(s) and their API key(s).
+  # For a single user, define one named account:
+  #   accounts:
+  #     myuser: "your_immich_api_key_here"
+  # Or define multiple accounts to test filters across different users or all users at once:
   accounts:
-    # alice: "api_key_for_alice"
+    alice: "your_immich_api_key_here"
     # bob: "api_key_for_bob"
 
   # Optional: Allow insecure/self-signed SSL certificates (default: false)
@@ -40,4 +41,3 @@ defaults:
 
   # Include archived assets by default when no explicit visibility filter is set
   include_archived: false
-

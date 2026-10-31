@@ -6,6 +6,7 @@ const state = {
 	immichUrl: '',
 	externalUrl: '',
 	accounts: [],
+	accountDetails: [],
 	selectedUser: '',
 	searchMode: 'random',
 	orderByField: 'localDateTime',
@@ -965,10 +966,15 @@ function updateRequestAndCurlPreviews() {
 	if (curlViewer) {
 		const baseUrl = state.immichUrl || 'http://localhost:2283';
 		const bodyCompact = state.lastRequestBodyJson || '{}';
+		const activeUser = state.selectedUser;
+		const apiKeyPlaceholder = activeUser
+			? `$IMMICH_API_KEY_${activeUser.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
+			: '$IMMICH_API_KEY';
+
 		curlViewer.value = [
 			`curl -X POST "${baseUrl}${endpoint}" \\`,
 			`  -H "Content-Type: application/json" \\`,
-			`  -H "x-api-key: $IMMICH_API_KEY" \\`,
+			`  -H "x-api-key: ${apiKeyPlaceholder}" \\`,
 			`  -d '${bodyCompact.replace(/'/g, "'\\''")}'`
 		].join('\n');
 	}
@@ -1114,7 +1120,7 @@ function renderSearchResults(data) {
 							${item.type === 'VIDEO' ? '<span class="badge-pill badge-video">▶ VIDEO</span>' : ''}
 							${item.isFavorite ? '<span class="badge-pill badge-fav">♥</span>' : ''}
 							${item.rating > 0 ? `<span class="badge-pill badge-rating">★ ${item.rating}</span>` : ''}
-							${item.user ? `<span class="badge-pill badge-user">@${escapeHtml(item.user)}</span>` : ''}
+							${item.user ? `<button type="button" class="badge-pill badge-user interactive-badge" onclick="event.stopPropagation(); filterByAccount('${escapeHtml(item.user)}')" title="Click to filter by @${escapeHtml(item.user)}">@${escapeHtml(item.user)}</button>` : ''}
 						</div>
 					</div>
 					<div class="asset-meta">
@@ -1165,7 +1171,7 @@ window.openAssetModal = function(index) {
 			${item.user ? `
 			<div class="meta-row">
 				<span class="meta-label">Account</span>
-				<span class="meta-val">@${escapeHtml(item.user)}</span>
+				<span class="meta-val"><button type="button" class="badge-pill badge-user interactive-badge" onclick="const d = document.getElementById('asset-dialog'); if (d) d.close(); filterByAccount('${escapeHtml(item.user)}')" title="Filter by @${escapeHtml(item.user)}">@${escapeHtml(item.user)}</button></span>
 			</div>` : ''}
 			${item.takenAt ? `
 			<div class="meta-row">
@@ -1250,6 +1256,7 @@ async function bootstrapApp() {
 		state.immichUrl = data.immichUrl || '';
 		state.externalUrl = data.externalUrl || '';
 		state.accounts = data.accounts || [];
+		state.accountDetails = data.accountDetails || [];
 		state.selectedUser = data.selectedUser || '';
 		state.metadata = data.metadata || state.metadata;
 
@@ -1302,7 +1309,14 @@ function updateConnectionBanner(data) {
 
 	if (data.configured) {
 		if (dot) dot.className = 'status-dot connected';
-		if (lbl) lbl.textContent = data.immichUrl;
+		if (lbl) {
+			try {
+				const parsed = new URL(data.immichUrl);
+				lbl.textContent = parsed.host;
+			} catch (_) {
+				lbl.textContent = data.immichUrl;
+			}
+		}
 	} else {
 		if (dot) dot.className = 'status-dot error';
 		if (lbl) lbl.textContent = 'Not Configured';
@@ -1319,17 +1333,203 @@ function updateConnectionBanner(data) {
 }
 
 function populateAccountsSelector() {
-	const wrap = document.getElementById('account-selector-wrap');
-	const select = document.getElementById('account-select');
-	if (!wrap || !select) return;
+	const pillWrap = document.getElementById('account-identity-pill');
+	const pillName = document.getElementById('account-identity-name');
+	const dropdownWrap = document.getElementById('account-dropdown-wrap');
+	const nativeSelect = document.getElementById('account-select');
 
-	if (state.accounts.length > 0) {
-		wrap.hidden = false;
-		select.innerHTML = `<option value="">All Accounts (${state.accounts.length})</option>` +
+	if (nativeSelect) {
+		nativeSelect.innerHTML = `<option value="">All Accounts (${state.accounts.length})</option>` +
 			state.accounts.map(u => `<option value="${escapeHtml(u)}" ${state.selectedUser === u ? 'selected' : ''}>@${escapeHtml(u)}</option>`).join('');
-	} else {
-		wrap.hidden = true;
+		nativeSelect.value = state.selectedUser || '';
 	}
+
+	if (state.accounts.length === 0) {
+		if (pillWrap) pillWrap.hidden = true;
+		if (dropdownWrap) dropdownWrap.hidden = true;
+		return;
+	}
+
+	if (state.accounts.length === 1) {
+		// Single account: show clean identity pill
+		if (dropdownWrap) dropdownWrap.hidden = true;
+		if (pillWrap) {
+			pillWrap.hidden = false;
+			const accName = state.accounts[0];
+			if (pillName) pillName.textContent = `@${accName}`;
+		}
+		return;
+	}
+
+	// Multiple accounts: show interactive switcher
+	if (pillWrap) pillWrap.hidden = true;
+	if (dropdownWrap) {
+		dropdownWrap.hidden = false;
+		updateAccountSwitcherLabel();
+		renderAccountMenu();
+	}
+}
+
+function updateAccountSwitcherLabel() {
+	const btnLabel = document.getElementById('account-btn-label');
+	const btnIcon = document.getElementById('account-btn-icon');
+	if (!btnLabel) return;
+
+	if (state.selectedUser) {
+		btnLabel.textContent = `@${state.selectedUser}`;
+		if (btnIcon) btnIcon.textContent = '👤';
+	} else {
+		btnLabel.textContent = `All Accounts (${state.accounts.length})`;
+		if (btnIcon) btnIcon.textContent = '👥';
+	}
+}
+
+function renderAccountMenu() {
+	const menuPopover = document.getElementById('account-menu-popover');
+	if (!menuPopover) return;
+
+	const healthMap = {};
+	(state.accountDetails || []).forEach(a => { healthMap[a.name] = a.valid; });
+
+	const isAllActive = !state.selectedUser;
+	let itemsHtml = `
+		<button type="button" class="account-menu-item ${isAllActive ? 'active' : ''}" onclick="selectAccount('')" role="option" aria-selected="${isAllActive}">
+			<span>👥 All Accounts (${state.accounts.length})</span>
+			<span class="account-item-status ok" title="Queries all accounts in parallel"></span>
+		</button>
+		<hr style="border:0;border-top:1px solid var(--border-color);margin:0.25rem 0;">
+	`;
+
+	itemsHtml += state.accounts.map(acc => {
+		const isActive = (state.selectedUser === acc);
+		const isOk = healthMap[acc] !== false;
+		return `
+			<button type="button" class="account-menu-item ${isActive ? 'active' : ''}" onclick="selectAccount('${escapeHtml(acc)}')" role="option" aria-selected="${isActive}">
+				<span>👤 @${escapeHtml(acc)}</span>
+				<span class="account-item-status ${isOk ? 'ok' : 'err'}" title="${isOk ? 'Active & authenticated' : 'Metadata query reported warnings/errors'}"></span>
+			</button>
+		`;
+	}).join('');
+
+	menuPopover.innerHTML = itemsHtml;
+}
+
+window.selectAccount = async function(accountName) {
+	state.selectedUser = accountName || '';
+	const nativeSelect = document.getElementById('account-select');
+	if (nativeSelect) nativeSelect.value = state.selectedUser;
+
+	updateAccountSwitcherLabel();
+	renderAccountMenu();
+	closeAccountMenu();
+
+	const url = new URL(window.location);
+	if (state.selectedUser) {
+		url.searchParams.set('user', state.selectedUser);
+	} else {
+		url.searchParams.delete('user');
+	}
+	window.history.replaceState({}, '', url);
+
+	try {
+		const resp = await fetch('/api/metadata/refresh' + (state.selectedUser ? `?user=${encodeURIComponent(state.selectedUser)}` : ''), {
+			method: 'POST'
+		});
+		const data = await resp.json();
+		if (data.metadata) state.metadata = data.metadata;
+		if (data.accountHealth) {
+			state.accountDetails = Object.keys(data.accountHealth).map(k => ({ name: k, valid: data.accountHealth[k] }));
+			renderAccountMenu();
+		}
+		renderRuleTree();
+	} catch (e) {
+		console.warn('Metadata refresh failed on account switch:', e);
+	}
+
+	syncFromRuleTree();
+};
+
+window.filterByAccount = function(accountName) {
+	selectAccount(accountName);
+};
+
+function toggleAccountMenu() {
+	const popover = document.getElementById('account-menu-popover');
+	const btn = document.getElementById('account-switcher-btn');
+	if (!popover || !btn) return;
+	const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+	if (isExpanded) {
+		closeAccountMenu();
+	} else {
+		popover.hidden = false;
+		btn.setAttribute('aria-expanded', 'true');
+	}
+}
+
+function closeAccountMenu() {
+	const popover = document.getElementById('account-menu-popover');
+	const btn = document.getElementById('account-switcher-btn');
+	if (popover) popover.hidden = true;
+	if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function openConnectionDialog() {
+	const dialog = document.getElementById('connection-dialog');
+	if (!dialog) return;
+
+	const urlEl = document.getElementById('dialog-server-url');
+	const extRow = document.getElementById('dialog-ext-url-row');
+	const extUrlEl = document.getElementById('dialog-ext-url');
+	const statusEl = document.getElementById('dialog-server-status');
+	const countEl = document.getElementById('dialog-accounts-count');
+	const listEl = document.getElementById('dialog-accounts-list');
+
+	if (urlEl) urlEl.textContent = state.immichUrl || 'Not configured';
+	if (extRow && extUrlEl) {
+		if (state.externalUrl && state.externalUrl !== state.immichUrl) {
+			extRow.hidden = false;
+			extUrlEl.textContent = state.externalUrl;
+		} else {
+			extRow.hidden = true;
+		}
+	}
+
+	if (statusEl) {
+		statusEl.innerHTML = state.immichUrl
+			? '<span class="status-dot connected" style="display:inline-block;margin-right:6px;"></span> Connected'
+			: '<span class="status-dot error" style="display:inline-block;margin-right:6px;"></span> Not configured';
+	}
+
+	if (countEl) countEl.textContent = state.accounts.length;
+
+	if (listEl) {
+		if (state.accounts.length === 0) {
+			listEl.innerHTML = '<div style="font-size:0.82rem;color:var(--text-muted);padding:0.5rem;">No accounts configured. Define <code>accounts:</code> in <code>config.yaml</code>.</div>';
+		} else {
+			const healthMap = {};
+			(state.accountDetails || []).forEach(a => { healthMap[a.name] = a.valid; });
+
+			listEl.innerHTML = state.accounts.map(acc => {
+				const isOk = healthMap[acc] !== false;
+				const isSelected = (state.selectedUser === acc);
+				return `
+					<div class="connection-account-row">
+						<div class="connection-account-name">
+							<span>👤</span>
+							<span>@${escapeHtml(acc)}</span>
+							${isSelected ? '<span class="badge-pill badge-rating" style="font-size:0.68rem;">ACTIVE</span>' : ''}
+						</div>
+						<span class="connection-account-status ${isOk ? 'ok' : 'err'}">
+							<span class="status-dot ${isOk ? 'connected' : 'error'}"></span>
+							${isOk ? 'Authenticated' : 'Warning/Error'}
+						</span>
+					</div>
+				`;
+			}).join('');
+		}
+	}
+
+	dialog.showModal();
 }
 
 function syncToolbarControls() {
@@ -1484,6 +1684,8 @@ function applyProfile(profileId) {
 			state.selectedUser = prof.user;
 			const accSelect = document.getElementById('account-select');
 			if (accSelect) accSelect.value = prof.user;
+			updateAccountSwitcherLabel();
+			renderAccountMenu();
 		}
 
 		syncToolbarControls();
@@ -1627,16 +1829,34 @@ document.addEventListener('DOMContentLoaded', () => {
 		});
 	});
 
-	// Account change
+	// Connection status dialog trigger
+	const connStatusBtn = document.getElementById('connection-status');
+	if (connStatusBtn) {
+		connStatusBtn.addEventListener('click', () => openConnectionDialog());
+	}
+
+	// Account dropdown switcher button trigger
+	const accountSwitcherBtn = document.getElementById('account-switcher-btn');
+	if (accountSwitcherBtn) {
+		accountSwitcherBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			toggleAccountMenu();
+		});
+	}
+
+	// Close account menu popover when clicking outside
+	document.addEventListener('click', (e) => {
+		const wrap = document.getElementById('account-dropdown-wrap');
+		if (wrap && !wrap.contains(e.target)) {
+			closeAccountMenu();
+		}
+	});
+
+	// Account change (from hidden native select or sync)
 	const accountSelect = document.getElementById('account-select');
 	if (accountSelect) {
-		accountSelect.addEventListener('change', async () => {
-			state.selectedUser = accountSelect.value;
-			const resp = await fetch('/api/bootstrap' + (state.selectedUser ? `?user=${encodeURIComponent(state.selectedUser)}` : ''));
-			const data = await resp.json();
-			state.metadata = data.metadata || state.metadata;
-			renderRuleTree();
-			syncFromRuleTree();
+		accountSelect.addEventListener('change', () => {
+			selectAccount(accountSelect.value);
 		});
 	}
 

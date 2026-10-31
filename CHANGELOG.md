@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.3.0] - 2026-10-31
+
+### Changed
+- **Unified Account Configuration**: Replaced separate `api_key` configuration with a unified `accounts` mapping. Supported as both a map (`username: apiKey`) and single string shorthand (`accounts: "key"`) with full backward compatibility for legacy `api_key` and `IMMICH_API_KEY`.
+- **Topbar Account Switcher**: Redesigned the topbar account control. Single-account environments now display an active identity badge (`👤 @user`), while multi-account environments feature a custom dropdown menu with live authentication status.
+
+### Added
+- **Connection & Accounts Dialog**: Added a topbar dialog reachable by clicking the connection status pill to view Immich server details, external URLs, and all configured accounts with per-account health indicators.
+- **Interactive Asset Card Badges**: Account badges on gallery photos are now clickable, allowing instant one-click view isolation to any user's library.
+- **Account-Aware cURL Snippets**: Code viewer cURL generation now contextually binds to the currently active account.
+
 ## [1.2.0] - 2026-10-31
 
 Official public production release.

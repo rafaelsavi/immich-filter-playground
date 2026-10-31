@@ -856,6 +856,7 @@ p, blockquote, li, .pretty-text {
 	background: #0f172a;
 	overflow: hidden;
 	color-scheme: dark;
+	min-height: 400px;
 }
 
 .code-editor-wrapper.has-error {
@@ -864,6 +865,9 @@ p, blockquote, li, .pretty-text {
 
 .code-textarea {
 	width: 100%;
+	height: 400px;
+	min-height: 400px;
+	box-sizing: border-box;
 	display: block;
 	background: #0f172a;
 	color: #f1f5f9;
@@ -1462,3 +1466,284 @@ dialog#save-profile-dialog::backdrop {
 }
 
 
+
+/* ==========================================================================
+   Modern Modal Scroll Containment (per modern-web-guidance)
+   ========================================================================== */
+dialog:modal {
+	overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+	overflow: hidden;
+	overscroll-behavior: contain;
+}
+
+/* ==========================================================================
+   Interactive Connection Pill & Account Controls
+   ========================================================================== */
+.connection-pill-btn {
+	cursor: pointer;
+	border: 1px solid var(--border-strong);
+	transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+}
+
+.connection-pill-btn:hover {
+	border-color: var(--accent-color);
+	background: var(--bg-elevated);
+}
+
+.account-control-group {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.visually-hidden {
+	position: absolute !important;
+	width: 1px !important;
+	height: 1px !important;
+	padding: 0 !important;
+	margin: -1px !important;
+	overflow: hidden !important;
+	clip: rect(0, 0, 0, 0) !important;
+	white-space: nowrap !important;
+	border: 0 !important;
+}
+
+.account-identity-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.35rem 0.75rem;
+	border-radius: 9999px;
+	font-size: 0.8rem;
+	font-weight: 700;
+	background: var(--accent-soft);
+	color: var(--accent-color);
+	border: 1px solid var(--accent-color);
+}
+
+.account-dropdown-wrap {
+	position: relative;
+	display: inline-flex;
+}
+
+.account-switcher-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.38rem 0.85rem;
+	border-radius: 9999px;
+	font-size: 0.8rem;
+	font-weight: 700;
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-strong);
+	color: var(--text-primary);
+	cursor: pointer;
+	transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.account-switcher-btn:hover,
+.account-switcher-btn[aria-expanded="true"] {
+	border-color: var(--accent-color);
+	background: var(--bg-elevated);
+}
+
+.account-btn-caret {
+	font-size: 0.75rem;
+	opacity: 0.7;
+	transition: transform 0.15s ease;
+}
+
+.account-switcher-btn[aria-expanded="true"] .account-btn-caret {
+	transform: rotate(180deg);
+}
+
+.account-menu-popover {
+	position: absolute;
+	top: calc(100% + 0.45rem);
+	right: 0;
+	min-width: 220px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-strong);
+	border-radius: 0.75rem;
+	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+	padding: 0.4rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+	z-index: 1000;
+}
+
+.account-menu-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	border-radius: 0.5rem;
+	font-size: 0.82rem;
+	font-weight: 600;
+	color: var(--text-primary);
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	width: 100%;
+	text-align: left;
+	transition: background-color 0.12s ease;
+}
+
+.account-menu-item:hover {
+	background: var(--bg-subtle);
+}
+
+.account-menu-item.active {
+	background: var(--accent-soft);
+	color: var(--accent-color);
+	font-weight: 700;
+}
+
+.account-item-status {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background: #94a3b8;
+}
+
+.account-item-status.ok {
+	background: #10b981;
+}
+
+.account-item-status.err {
+	background: #ef4444;
+}
+
+.badge-pill.badge-user.interactive-badge {
+	cursor: pointer;
+	transition: transform 0.12s ease, opacity 0.12s ease;
+	user-select: none;
+}
+
+.badge-pill.badge-user.interactive-badge:hover {
+	transform: scale(1.08);
+	opacity: 0.9;
+	box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* ==========================================================================
+   Connection & Accounts Dialog
+   ========================================================================== */
+dialog#connection-dialog {
+	border: 1px solid var(--border-strong);
+	border-radius: 0.9rem;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	padding: 0;
+	width: 90vw;
+	max-width: 540px;
+	box-shadow: 0 20px 45px rgba(0, 0, 0, 0.4);
+}
+
+dialog#connection-dialog::backdrop {
+	background-color: rgba(15, 23, 42, 0.65);
+	backdrop-filter: blur(3px);
+}
+
+.connection-dialog-content .dialog-body {
+	display: flex;
+	flex-direction: column;
+	gap: 1.25rem;
+	padding: 1.25rem;
+}
+
+.connection-info-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0.75rem;
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-color);
+	border-radius: 0.65rem;
+	padding: 0.85rem 1rem;
+}
+
+.connection-info-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 0.82rem;
+}
+
+.connection-accounts-box {
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+}
+
+.connection-accounts-head {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+}
+
+.connection-accounts-head h4 {
+	font-size: 0.95rem;
+	font-weight: 700;
+}
+
+.connection-accounts-note {
+	font-size: 0.78rem;
+	color: var(--text-muted);
+}
+
+.connection-accounts-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	max-height: 240px;
+	overflow-y: auto;
+}
+
+.connection-account-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.6rem 0.85rem;
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-color);
+	border-radius: 0.55rem;
+	font-size: 0.83rem;
+	font-weight: 600;
+}
+
+.connection-account-name {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.connection-account-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+}
+
+.connection-account-status.ok {
+	color: #10b981;
+}
+
+.connection-account-status.err {
+	color: #ef4444;
+}
+
+.connection-footer-note {
+	font-size: 0.78rem;
+	color: var(--text-secondary);
+	background: var(--accent-soft);
+	border-left: 3px solid var(--accent-color);
+	padding: 0.65rem 0.85rem;
+	border-radius: 0.35rem;
+}

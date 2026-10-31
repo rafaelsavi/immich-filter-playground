@@ -10,10 +10,7 @@ services:
       # Immich Server Connection
       - IMMICH_URL=http://immich-server:2283
       - IMMICH_EXTERNAL_URL=https://photos.example.com # Optional: Public URL for browser links
-      - IMMICH_API_KEY=your_immich_api_key_here
-
-      # Optional: Named accounts (user1:key1,user2:key2)
-      # - IMMICH_ACCOUNTS=alice:key1,bob:key2
+      - IMMICH_ACCOUNTS=alice:your_immich_api_key_here
 
       # Optional: Skip TLS verification for self-signed certificates
       # - IMMICH_INSECURE_SKIP_VERIFY=true
@@ -24,7 +21,7 @@ services:
       - PLAYGROUND_INCLUDE_VIDEOS=true
       - PLAYGROUND_INCLUDE_ARCHIVED=false
 
-    # Alternatively, mount a config.yaml instead of environment variables:
+    # Optional: mount local config.yaml and persistent profiles
     # volumes:
     #   - ./config.yaml:/app/config.yaml:ro
-
+    #   - ./profiles.json:/app/profiles.json

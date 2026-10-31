@@ -13,7 +13,7 @@ Thank you for your interest in contributing to **Immich Filter Playground**!
    git clone https://github.com/rafaelsavi/immich-filter-playground.git
    cd immich-filter-playground
    cp config.example.yaml config.yaml
-   # Edit config.yaml with your Immich URL & API key
+   # Edit config.yaml with your Immich URL & accounts
    go run .
    ```
 

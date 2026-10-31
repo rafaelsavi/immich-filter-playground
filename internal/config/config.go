@@ -11,6 +11,45 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FlexibleAccounts supports unmarshaling both a map of username -> apiKey
+// and a single scalar string apiKey (automatically assigned to account "default").
+type FlexibleAccounts map[string]string
+
+// UnmarshalYAML implements custom YAML unmarshaling for FlexibleAccounts.
+func (fa *FlexibleAccounts) UnmarshalYAML(value *yaml.Node) error {
+	if *fa == nil {
+		*fa = make(FlexibleAccounts)
+	}
+	switch value.Kind {
+	case yaml.ScalarNode:
+		val := strings.TrimSpace(value.Value)
+		if val != "" {
+			(*fa)["default"] = val
+		}
+		return nil
+	case yaml.MappingNode:
+		var m map[string]string
+		if err := value.Decode(&m); err != nil {
+			return err
+		}
+		for k, v := range m {
+			kClean := strings.TrimSpace(k)
+			vClean := strings.TrimSpace(v)
+			if kClean != "" && vClean != "" {
+				(*fa)[kClean] = vClean
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// MarshalYAML serializes FlexibleAccounts as a standard map.
+func (fa FlexibleAccounts) MarshalYAML() (any, error) {
+	return map[string]string(fa), nil
+}
+
 // Config holds the full configuration for the Immich Filter Playground server.
 type Config struct {
 	Server   ServerConfig   `yaml:"server" json:"server"`
@@ -33,12 +72,12 @@ type ServerConfig struct {
 
 // ImmichConfig configures the connection and credentials for Immich.
 type ImmichConfig struct {
-	URL                string            `yaml:"url" json:"url"`
-	ExternalURL        string            `yaml:"external_url" json:"externalUrl"`
-	APIKey             string            `yaml:"api_key" json:"-"`
-	Accounts           map[string]string `yaml:"accounts" json:"-"`
-	InsecureSkipVerify bool              `yaml:"insecure_skip_verify" json:"insecureSkipVerify"`
-	TimeoutSeconds     int               `yaml:"timeout_seconds" json:"timeoutSeconds"`
+	URL                string           `yaml:"url" json:"url"`
+	ExternalURL        string           `yaml:"external_url" json:"externalUrl"`
+	APIKey             string           `yaml:"api_key,omitempty" json:"-"` // Deprecated: preserved for backward compatibility
+	Accounts           FlexibleAccounts `yaml:"accounts" json:"-"`
+	InsecureSkipVerify bool             `yaml:"insecure_skip_verify" json:"insecureSkipVerify"`
+	TimeoutSeconds     int              `yaml:"timeout_seconds" json:"timeoutSeconds"`
 }
 
 // DefaultsConfig configures default filter playground behavior.
@@ -58,7 +97,7 @@ func Default() *Config {
 			ProfilesFile: "profiles.json",
 		},
 		Immich: ImmichConfig{
-			Accounts:       make(map[string]string),
+			Accounts:       make(FlexibleAccounts),
 			TimeoutSeconds: 45,
 		},
 		Defaults: DefaultsConfig{
@@ -103,7 +142,7 @@ func Load(configPath string) (*Config, error) {
 
 func (c *Config) normalizeFlatFields() {
 	if c.Immich.Accounts == nil {
-		c.Immich.Accounts = make(map[string]string)
+		c.Immich.Accounts = make(FlexibleAccounts)
 	}
 	if c.Immich.URL == "" && c.FlatImmichURL != "" {
 		c.Immich.URL = c.FlatImmichURL
@@ -219,7 +258,7 @@ func (c *Config) normalize() {
 	c.Immich.ExternalURL = strings.TrimRight(strings.TrimSpace(c.Immich.ExternalURL), "/")
 	c.Immich.APIKey = strings.TrimSpace(c.Immich.APIKey)
 
-	cleanedAccounts := make(map[string]string)
+	cleanedAccounts := make(FlexibleAccounts)
 	for u, k := range c.Immich.Accounts {
 		uClean := strings.TrimSpace(u)
 		kClean := strings.TrimSpace(k)
@@ -229,8 +268,29 @@ func (c *Config) normalize() {
 	}
 	c.Immich.Accounts = cleanedAccounts
 
+	// Backward compatibility: If legacy APIKey was supplied, ensure it is available in Accounts
+	if c.Immich.APIKey != "" {
+		if len(c.Immich.Accounts) == 0 {
+			c.Immich.Accounts["default"] = c.Immich.APIKey
+		} else {
+			hasKey := false
+			for _, k := range c.Immich.Accounts {
+				if k == c.Immich.APIKey {
+					hasKey = true
+					break
+				}
+			}
+			if !hasKey {
+				if _, exists := c.Immich.Accounts["default"]; !exists {
+					c.Immich.Accounts["default"] = c.Immich.APIKey
+				}
+			}
+		}
+	}
+
+	// Ensure APIKey is populated for internal fallback
 	if c.Immich.APIKey == "" {
-		if defKey, ok := c.Immich.Accounts["default"]; ok {
+		if defKey, ok := c.Immich.Accounts["default"]; ok && defKey != "" {
 			c.Immich.APIKey = defKey
 		} else if len(c.Immich.Accounts) > 0 {
 			names := c.AccountNames()
@@ -251,20 +311,30 @@ func (c *Config) normalize() {
 	}
 }
 
-// AccountNames returns the sorted list of named user accounts (excluding "default").
+// AccountNames returns the sorted list of user accounts.
+// If named accounts exist alongside "default", "default" is omitted unless it is the only account.
 func (c *Config) AccountNames() []string {
 	var names []string
+	var hasDefault bool
 	for u, k := range c.Immich.Accounts {
 		uClean := strings.TrimSpace(u)
-		if uClean != "" && uClean != "default" && strings.TrimSpace(k) != "" {
-			names = append(names, uClean)
+		if uClean == "" || strings.TrimSpace(k) == "" {
+			continue
 		}
+		if uClean == "default" {
+			hasDefault = true
+			continue
+		}
+		names = append(names, uClean)
 	}
 	sort.Strings(names)
+	if len(names) == 0 && hasDefault {
+		return []string{"default"}
+	}
 	return names
 }
 
-// APIKeyForUser returns the API key for a named user, falling back to the default API key.
+// APIKeyForUser returns the API key for a named user, falling back to the default or first available account.
 func (c *Config) APIKeyForUser(user string) string {
 	user = strings.TrimSpace(user)
 	if user != "" && user != "all" {
@@ -277,7 +347,17 @@ func (c *Config) APIKeyForUser(user string) string {
 			}
 		}
 	}
-	return c.Immich.APIKey
+	if defKey, ok := c.Immich.Accounts["default"]; ok && defKey != "" {
+		return defKey
+	}
+	if c.Immich.APIKey != "" {
+		return c.Immich.APIKey
+	}
+	names := c.AccountNames()
+	if len(names) > 0 {
+		return c.Immich.Accounts[names[0]]
+	}
+	return ""
 }
 
 // ExternalURL returns the external Immich URL for browser links, falling back to Immich.URL.
@@ -288,9 +368,9 @@ func (c *Config) ExternalURL() string {
 	return c.Immich.URL
 }
 
-// IsConfigured reports whether an Immich URL and at least one API key are configured.
+// IsConfigured reports whether an Immich URL and at least one account API key are configured.
 func (c *Config) IsConfigured() bool {
-	return c.Immich.URL != "" && (c.Immich.APIKey != "" || len(c.Immich.Accounts) > 0)
+	return c.Immich.URL != "" && (len(c.Immich.Accounts) > 0 || c.Immich.APIKey != "")
 }
 
 // SaveYAML writes the clean nested configuration structure to the given file path.

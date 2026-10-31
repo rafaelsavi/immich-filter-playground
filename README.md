@@ -72,9 +72,8 @@ services:
     environment:
       - IMMICH_URL=http://immich-server:2283
       - IMMICH_EXTERNAL_URL=https://photos.yourdomain.com
-      - IMMICH_API_KEY=your_immich_api_key_here
-      # Optional: named accounts for multi-user setups
-      # - IMMICH_ACCOUNTS=alice:key1,bob:key2
+      - IMMICH_ACCOUNTS=alice:your_immich_api_key_here
+      # Or multiple accounts: - IMMICH_ACCOUNTS=alice:key1,bob:key2
 ```
 
 Then start the container:
@@ -88,7 +87,7 @@ docker compose up -d
 git clone https://github.com/rafaelsavi/immich-filter-playground.git
 cd immich-filter-playground
 cp config.example.yaml config.yaml
-# Edit config.yaml with your Immich URL & API key
+# Edit config.yaml with your Immich URL & accounts
 go run .
 ```
 
@@ -108,8 +107,7 @@ You can configure the application using a YAML file (`config.yaml`), a `.env` fi
 | `server.port` | `PLAYGROUND_PORT` / `PORT` | `8090` | HTTP listening port |
 | `immich.url` | `IMMICH_URL` | — | Base URL of your Immich instance |
 | `immich.external_url` | `IMMICH_EXTERNAL_URL` | `immich.url` | Public URL for "Open in Immich" links |
-| `immich.api_key` | `IMMICH_API_KEY` | — | Default Immich API Key |
-| `immich.accounts` | `IMMICH_ACCOUNTS` | — | Multi-user accounts (`user1:key1,user2:key2`) |
+| `immich.accounts` | `IMMICH_ACCOUNTS` / `IMMICH_ACCOUNT_<NAME>` | — | Immich user account(s) and API key(s) |
 | `immich.insecure_skip_verify` | `IMMICH_INSECURE_SKIP_VERIFY` | `false` | Set `true` to allow self-signed SSL certs |
 | `immich.timeout_seconds` | `IMMICH_TIMEOUT_SECONDS` | `45` | API request timeout in seconds |
 | `defaults.sample_size` | `PLAYGROUND_SAMPLE_SIZE` | `24` | Default preview gallery item count |
@@ -127,9 +125,7 @@ server:
 immich:
   url: "http://192.168.1.100:2283"
   external_url: "https://photos.example.com"
-  api_key: "your_immich_api_key_here"
-
-  # Optional: Configure named accounts for testing filters across different users
+  # User account(s) and their API key(s)
   accounts:
     alice: "api_key_for_alice"
     bob: "api_key_for_bob"

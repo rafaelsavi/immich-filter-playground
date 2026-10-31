@@ -65,3 +65,71 @@ defaults:
 	}
 }
 
+func TestLoadAccountsWithoutAPIKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+immich:
+  url: "https://photos.example.com"
+  accounts:
+    familia-savi: "key-familia"
+    rafael: "key-rafael"
+`
+	if err := os.WriteFile(cfgFile, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("writing temp config: %v", err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if !cfg.IsConfigured() {
+		t.Error("expected IsConfigured to be true")
+	}
+	accounts := cfg.AccountNames()
+	if len(accounts) != 2 || accounts[0] != "familia-savi" || accounts[1] != "rafael" {
+		t.Errorf("unexpected accounts: %v", accounts)
+	}
+	if cfg.APIKeyForUser("familia-savi") != "key-familia" {
+		t.Errorf("expected key-familia, got %q", cfg.APIKeyForUser("familia-savi"))
+	}
+	if cfg.APIKeyForUser("rafael") != "key-rafael" {
+		t.Errorf("expected key-rafael, got %q", cfg.APIKeyForUser("rafael"))
+	}
+	// Fallback when empty user should give first account
+	if cfg.APIKeyForUser("") != "key-familia" {
+		t.Errorf("expected first account key as default fallback, got %q", cfg.APIKeyForUser(""))
+	}
+}
+
+func TestLoadSingleStringAccount(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+immich:
+  url: "https://photos.example.com"
+  accounts: "single-user-key"
+`
+	if err := os.WriteFile(cfgFile, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("writing temp config: %v", err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if !cfg.IsConfigured() {
+		t.Error("expected IsConfigured to be true")
+	}
+	accounts := cfg.AccountNames()
+	if len(accounts) != 1 || accounts[0] != "default" {
+		t.Errorf("expected [default] for single-string account, got %v", accounts)
+	}
+	if cfg.APIKeyForUser("") != "single-user-key" {
+		t.Errorf("expected single-user-key, got %q", cfg.APIKeyForUser(""))
+	}
+}

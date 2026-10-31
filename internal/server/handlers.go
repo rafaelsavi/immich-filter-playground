@@ -33,15 +33,21 @@ type metadataPayload struct {
 	Lenses    []string         `json:"lenses"`
 }
 
+type accountStatusItem struct {
+	Name  string `json:"name"`
+	Valid bool   `json:"valid"`
+}
+
 type bootstrapResponse struct {
-	Configured   bool            `json:"configured"`
-	ImmichURL    string          `json:"immichUrl"`
-	ExternalURL  string          `json:"externalUrl"`
-	Accounts     []string        `json:"accounts"`
-	SelectedUser string          `json:"selectedUser"`
-	Defaults     any             `json:"defaults"`
-	Metadata     metadataPayload `json:"metadata"`
-	Warnings     []string        `json:"warnings,omitempty"`
+	Configured     bool                `json:"configured"`
+	ImmichURL      string              `json:"immichUrl"`
+	ExternalURL    string              `json:"externalUrl"`
+	Accounts       []string            `json:"accounts"`
+	AccountDetails []accountStatusItem `json:"accountDetails,omitempty"`
+	SelectedUser   string              `json:"selectedUser"`
+	Defaults       any                 `json:"defaults"`
+	Metadata       metadataPayload     `json:"metadata"`
+	Warnings       []string            `json:"warnings,omitempty"`
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -50,17 +56,32 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		selectedUser = ""
 	}
 
-	meta, warnings := s.collectMetadata(r.Context(), selectedUser)
+	accounts := s.cfg.AccountNames()
+	if selectedUser == "" && len(accounts) == 1 {
+		selectedUser = accounts[0]
+	}
+
+	meta, warnings, accountHealth := s.collectMetadata(r.Context(), selectedUser)
+
+	var accountDetails []accountStatusItem
+	for _, acc := range accounts {
+		valid := true
+		if v, ok := accountHealth[acc]; ok {
+			valid = v
+		}
+		accountDetails = append(accountDetails, accountStatusItem{Name: acc, Valid: valid})
+	}
 
 	resp := bootstrapResponse{
-		Configured:   s.cfg.IsConfigured(),
-		ImmichURL:    s.cfg.Immich.URL,
-		ExternalURL:  s.cfg.ExternalURL(),
-		Accounts:     s.cfg.AccountNames(),
-		SelectedUser: selectedUser,
-		Defaults:     s.cfg.Defaults,
-		Metadata:     meta,
-		Warnings:     warnings,
+		Configured:     s.cfg.IsConfigured(),
+		ImmichURL:      s.cfg.Immich.URL,
+		ExternalURL:    s.cfg.ExternalURL(),
+		Accounts:       accounts,
+		AccountDetails: accountDetails,
+		SelectedUser:   selectedUser,
+		Defaults:       s.cfg.Defaults,
+		Metadata:       meta,
+		Warnings:       warnings,
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -72,14 +93,15 @@ func (s *Server) handleRefreshMetadata(w http.ResponseWriter, r *http.Request) {
 	if selectedUser == "all" {
 		selectedUser = ""
 	}
-	meta, warnings := s.collectMetadata(r.Context(), selectedUser)
+	meta, warnings, accountHealth := s.collectMetadata(r.Context(), selectedUser)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"metadata": meta,
-		"warnings": warnings,
+		"metadata":      meta,
+		"warnings":      warnings,
+		"accountHealth": accountHealth,
 	})
 }
 
-func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (metadataPayload, []string) {
+func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (metadataPayload, []string, map[string]bool) {
 	payload := metadataPayload{
 		People:    []metadataOption{},
 		Albums:    []metadataOption{},
@@ -93,7 +115,7 @@ func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (meta
 	}
 
 	if !s.cfg.IsConfigured() {
-		return payload, []string{"Immich URL or API key is not configured. Edit config.yaml or set IMMICH_URL and IMMICH_API_KEY."}
+		return payload, []string{"Immich URL or accounts are not configured. Edit config.yaml or set IMMICH_URL and IMMICH_ACCOUNTS."}, nil
 	}
 
 	accounts := s.cfg.AccountNames()
@@ -126,6 +148,7 @@ func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (meta
 	lensSet := make(map[string]struct{})
 
 	var warnings []string
+	accountHealth := make(map[string]bool)
 
 	for _, u := range usersToFetch {
 		username := u
@@ -158,6 +181,13 @@ func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (meta
 			}
 			if locErr != nil {
 				warnings = append(warnings, fmt.Sprintf("locations (%s): %v", userLabel, locErr))
+			}
+
+			hasErr := (pplErr != nil || albErr != nil || tagErr != nil || locErr != nil)
+			if username != "" {
+				accountHealth[username] = !hasErr
+			} else {
+				accountHealth["default"] = !hasErr
 			}
 
 			for _, p := range people {
@@ -238,7 +268,7 @@ func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (meta
 	payload.Makes = mapKeysSorted(makeSet)
 	payload.Lenses = mapKeysSorted(lensSet)
 
-	return payload, warnings
+	return payload, warnings, accountHealth
 }
 
 type searchRequest struct {
@@ -298,7 +328,7 @@ type userFilterQuery struct {
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.IsConfigured() {
 		writeJSON(w, http.StatusOK, searchResponse{
-			Error: "Immich URL or API key is not configured. Please check config.yaml or environment variables.",
+			Error: "Immich URL or accounts are not configured. Please check config.yaml or environment variables.",
 		})
 		return
 	}

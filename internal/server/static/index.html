@@ -21,14 +21,33 @@
 			</div>
 
 			<div class="topbar-controls">
-				<div class="connection-pill" id="connection-status" title="Immich Server Status">
+				<button type="button" class="connection-pill connection-pill-btn" id="connection-status" title="View Immich connection and account details">
 					<span class="status-dot" id="connection-dot"></span>
 					<span id="connection-label">Connecting...</span>
-				</div>
+				</button>
 
-				<div class="account-selector-wrap" id="account-selector-wrap" hidden>
-					<label for="account-select">Account:</label>
-					<select id="account-select" aria-label="Target Immich Account">
+				<!-- Interactive Account Switcher & Identity Pill -->
+				<div class="account-control-group" id="account-control-group">
+					<!-- Single-account identity badge -->
+					<div class="account-identity-pill" id="account-identity-pill" hidden title="Active Immich account">
+						<span class="account-pill-icon" aria-hidden="true">👤</span>
+						<span class="account-pill-name" id="account-identity-name"></span>
+					</div>
+
+					<!-- Multi-account interactive switcher -->
+					<div class="account-dropdown-wrap" id="account-dropdown-wrap" hidden>
+						<button type="button" class="account-switcher-btn" id="account-switcher-btn" aria-haspopup="listbox" aria-expanded="false" title="Switch target Immich account">
+							<span class="account-btn-icon" id="account-btn-icon" aria-hidden="true">👥</span>
+							<span class="account-btn-label" id="account-btn-label">All Accounts</span>
+							<span class="account-btn-caret" aria-hidden="true">▾</span>
+						</button>
+						<div class="account-menu-popover" id="account-menu-popover" role="listbox" aria-label="Immich Accounts" hidden>
+							<!-- Options rendered dynamically -->
+						</div>
+					</div>
+
+					<!-- Hidden native select kept for form / accessibility sync -->
+					<select id="account-select" aria-label="Target Immich Account" class="visually-hidden">
 						<option value="">All Accounts</option>
 					</select>
 				</div>
@@ -114,7 +133,7 @@
 							<textarea
 								id="filter-json-editor"
 								class="code-textarea"
-								rows="12"
+								rows="20"
 								spellcheck="false"
 								autocomplete="off"
 								aria-label="Search API v2 Filter JSON Editor"
@@ -132,7 +151,7 @@
 							<textarea
 								id="request-body-viewer"
 								class="code-textarea"
-								rows="12"
+								rows="20"
 								readonly
 								spellcheck="false"
 								aria-label="Full Immich Search API Request Body"
@@ -149,7 +168,7 @@
 							<textarea
 								id="curl-viewer"
 								class="code-textarea"
-								rows="12"
+								rows="20"
 								readonly
 								spellcheck="false"
 								aria-label="cURL Command"
@@ -288,6 +307,46 @@
 					<button type="submit" class="btn btn-primary" id="btn-confirm-save-profile">Save Profile</button>
 				</div>
 			</form>
+		</div>
+	</dialog>
+
+	<!-- Connection & Accounts Dialog -->
+	<dialog id="connection-dialog" closedby="any" aria-labelledby="connection-dialog-title">
+		<div class="dialog-content connection-dialog-content">
+			<div class="dialog-header">
+				<h3 id="connection-dialog-title">🔗 Immich Connection & Accounts</h3>
+				<form method="dialog">
+					<button type="submit" class="btn-icon" aria-label="Close modal">✕</button>
+				</form>
+			</div>
+			<div class="dialog-body connection-dialog-body">
+				<div class="connection-info-grid">
+					<div class="connection-info-item">
+						<span class="meta-label">Immich Server URL</span>
+						<span class="meta-val"><code id="dialog-server-url"></code></span>
+					</div>
+					<div class="connection-info-item" id="dialog-ext-url-row" hidden>
+						<span class="meta-label">External Web URL</span>
+						<span class="meta-val"><code id="dialog-ext-url"></code></span>
+					</div>
+					<div class="connection-info-item">
+						<span class="meta-label">Connection Status</span>
+						<span class="meta-val" id="dialog-server-status"></span>
+					</div>
+				</div>
+
+				<div class="connection-accounts-box">
+					<div class="connection-accounts-head">
+						<h4>Configured Accounts (<span id="dialog-accounts-count">0</span>)</h4>
+						<span class="connection-accounts-note">Loaded from <code>config.yaml</code> under <code>immich.accounts</code></span>
+					</div>
+					<div class="connection-accounts-list" id="dialog-accounts-list"></div>
+				</div>
+
+				<div class="connection-footer-note">
+					<p class="pretty-text">💡 Each account has its own API key configured in <code>config.yaml</code>. The playground runs searches and loads metadata across all accounts or isolated to an active account.</p>
+				</div>
+			</div>
 		</div>
 	</dialog>
 

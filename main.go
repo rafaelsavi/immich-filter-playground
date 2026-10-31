@@ -16,7 +16,7 @@ import (
 	"immich-filter-playground/internal/server"
 )
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 func main() {
 	configPath := flag.String("config", "", "Path to config.yaml file (defaults to ./config.yaml or CONFIG_FILE env var)")
@@ -72,7 +72,7 @@ func main() {
 	if cfg.IsConfigured() {
 		log.Printf("🔗 Connected to Immich: %s (accounts: %d)", cfg.Immich.URL, len(cfg.AccountNames()))
 	} else {
-		log.Printf("⚠️  Immich credentials not yet configured. Create config.yaml (see config.example.yaml) or set IMMICH_URL & IMMICH_API_KEY.")
+		log.Printf("⚠️  Immich credentials not yet configured. Create config.yaml (see config.example.yaml) or set IMMICH_URL & IMMICH_ACCOUNTS.")
 	}
 
 	// Graceful shutdown on SIGINT or SIGTERM

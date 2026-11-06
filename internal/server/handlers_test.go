@@ -68,6 +68,9 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	if err := json.Unmarshal(recSearch.Body.Bytes(), &sResp); err != nil {
 		t.Fatalf("unmarshaling search response: %v", err)
 	}
+	if sResp.Total != 1 || !sResp.TotalExact {
+		t.Errorf("expected random search total=1 exact=true, got total=%d exact=%v", sResp.Total, sResp.TotalExact)
+	}
 
 	// 2b. Test POST /api/search (metadata with orderBy)
 	metaPayload := `{"filterJson":"{\"country\":{\"in\":[\"Japan\"]}}","limit":24,"searchMode":"metadata","orderByField":"takenAt","orderByDirection":"desc"}`
@@ -100,7 +103,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	if err := json.Unmarshal(recHealth.Body.Bytes(), &healthResp); err != nil {
 		t.Fatalf("unmarshaling health response: %v", err)
 	}
-	if healthResp.Status != "ok" || !healthResp.Configured || healthResp.Version != "1.1.0" {
+	if healthResp.Status != "ok" || !healthResp.Configured || healthResp.Version != "1.3.1" {
 		t.Errorf("unexpected health response: %+v", healthResp)
 	}
 

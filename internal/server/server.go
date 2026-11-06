@@ -47,7 +47,7 @@ func (s *Server) routes() {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":     "ok",
 			"configured": s.cfg.IsConfigured(),
-			"version":    "1.1.0",
+			"version":    "1.3.1",
 		})
 	})
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

@@ -1084,6 +1084,8 @@ function renderSearchResults(data) {
 			countBadge.textContent = '0 matching';
 		} else if (total > assets.length) {
 			countBadge.textContent = `${total.toLocaleString()}${exact ? '' : '+'} matching (showing ${assets.length})`;
+		} else if (!exact) {
+			countBadge.textContent = `${total.toLocaleString()}+ matching (showing ${assets.length})`;
 		} else {
 			countBadge.textContent = `All ${assets.length.toLocaleString()} matching shown`;
 		}
@@ -1098,7 +1100,7 @@ function renderSearchResults(data) {
 
 	if (emptyEl) emptyEl.hidden = true;
 	if (loadMoreWrap) {
-		loadMoreWrap.hidden = !(total > assets.length && state.sampleSize < 240);
+		loadMoreWrap.hidden = !((total > assets.length || !exact) && state.sampleSize < 240);
 	}
 
 	if (gridEl) {

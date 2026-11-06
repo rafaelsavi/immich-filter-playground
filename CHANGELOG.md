@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.3.1] - 2026-11-06
+
+### Fixed
+- **Live Assets Matching Count in Random Mode**: Enabled asset counting across all search modes (Random Sample and Sorted Timeline). Previously, `CountAssets` was bypassed during random sampling, defaulting the reported count to the display window limit (24) and falsely displaying "All 24 matching shown".
+- **Asset Counting Performance & Memory**: Optimized `CountAssets` pagination probe parsing to read asset counts without deserializing redundant raw JSON payloads into memory, and raised per-user ceiling to 5,000 for accurate counts.
+- **Frontend Count Badge & Pagination**: Updated Live Assets count badge to accurately display non-exact count boundaries (`+` suffix) and ensure the "Load More" button remains available whenever more matching assets exist.
+
 ## [1.3.0] - 2026-10-31
 
 ### Changed

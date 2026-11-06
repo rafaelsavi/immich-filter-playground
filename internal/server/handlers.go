@@ -493,20 +493,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 
-		if searchMode == "metadata" {
-			countG.Go(func() error {
-				c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 2000, includeVideos, includeArchived)
-				if err == nil {
-					countMu.Lock()
-					totalMatching += c
-					if !exact {
-						isExactCount = false
-					}
-					countMu.Unlock()
-				}
+		countG.Go(func() error {
+			c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 5000, includeVideos, includeArchived)
+			countMu.Lock()
+			defer countMu.Unlock()
+			if err != nil {
+				isExactCount = false
 				return nil
-			})
-		}
+			}
+			totalMatching += c
+			if !exact {
+				isExactCount = false
+			}
+			return nil
+		})
 	}
 
 	_ = g.Wait()
@@ -515,6 +515,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	merged := interleaveUserAssetLists(userLists, limit)
 	if totalMatching < len(merged) {
 		totalMatching = len(merged)
+		if len(merged) > 0 {
+			isExactCount = false
+		}
 	}
 
 	errMsg := ""

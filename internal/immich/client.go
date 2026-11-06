@@ -447,15 +447,19 @@ func (c *Client) CountAssets(ctx context.Context, apiKey string, filter SearchFi
 
 		var resp struct {
 			Assets struct {
-				Items      []json.RawMessage `json:"items"`
-				NextCursor string            `json:"nextCursor"`
+				Count      int        `json:"count"`
+				Items      []struct{} `json:"items"`
+				NextCursor string     `json:"nextCursor"`
 			} `json:"assets"`
 		}
 		if err := json.Unmarshal(data, &resp); err != nil {
 			return total, false, err
 		}
 
-		pageCount := len(resp.Assets.Items)
+		pageCount := resp.Assets.Count
+		if pageCount == 0 && len(resp.Assets.Items) > 0 {
+			pageCount = len(resp.Assets.Items)
+		}
 		total += pageCount
 
 		if resp.Assets.NextCursor == "" || pageCount < 1000 || total >= maxCount {

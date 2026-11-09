@@ -1,14 +1,22 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [main, master]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
+  # ============================================================================
+  # STAGE 1: VALIDATE (Runs on EVERY PR and push to main)
+  # ============================================================================
+  validate:
+    name: Test (${{ matrix.os }} - Go ${{ matrix.go-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -34,3 +42,197 @@ jobs:
       - name: Run unit tests
         run: go test -v -race ./...
 
+  # ============================================================================
+  # EVALUATE RELEASE READINESS (Runs after validate on push to main)
+  # ============================================================================
+  check_release:
+    name: Evaluate Release Readiness
+    needs: validate
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version against remote tags
+        id: check
+        run: |
+          VERSION=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          TAG="v${VERSION}"
+          
+          # Check if tag already exists on remote origin
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            TAG_EXISTS=true
+            SHOULD_RELEASE=false
+          else
+            TAG_EXISTS=false
+            SHOULD_RELEASE=true
+          fi
+          
+          echo "Version: ${VERSION}, Tag: ${TAG}, Remote Tag Exists: ${TAG_EXISTS}, Should Release: ${SHOULD_RELEASE}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${SHOULD_RELEASE}" >> "$GITHUB_OUTPUT"
+
+  # ============================================================================
+  # STAGE 2: BUILD BINARIES (Runs ONLY if new version detected on main)
+  # ============================================================================
+  binaries:
+    name: Build Binaries (${{ matrix.output_name }})
+    needs: check_release
+    if: needs.check_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            output_name: immich-filter-playground-linux-amd64
+          - goos: linux
+            goarch: arm64
+            output_name: immich-filter-playground-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            output_name: immich-filter-playground-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            output_name: immich-filter-playground-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            output_name: immich-filter-playground-windows-amd64.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          VERSION: ${{ needs.check_release.outputs.tag }}
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/${{ matrix.output_name }} .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output_name }}
+          path: dist/${{ matrix.output_name }}
+
+  # ============================================================================
+  # STAGE 3: GITHUB RELEASE
+  # ============================================================================
+  release:
+    name: Create Tag & GitHub Release
+    needs: [check_release, binaries]
+    if: needs.check_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Release Notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.check_release.outputs.version }}
+        run: |
+          python3 -c "
+          import os, re
+          from pathlib import Path
+
+          content = Path('CHANGELOG.md').read_text(encoding='utf-8')
+          version = os.environ['VERSION']
+          pattern = rf'##\s*\[?v?{re.escape(version)}\]?[^\n]*\n(.*?)(?=\n##\s*\[|\Z)'
+          match = re.search(pattern, content, re.DOTALL)
+          notes = match.group(1).strip() if match else f'Release v{version}'
+
+          Path('release_notes.md').write_text(notes, encoding='utf-8')
+          "
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+
+      - name: Create and Push Git Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a ${{ needs.check_release.outputs.tag }} -m "Release ${{ needs.check_release.outputs.tag }}"
+          git push origin ${{ needs.check_release.outputs.tag }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check_release.outputs.tag }}
+          name: ${{ needs.check_release.outputs.tag }}
+          body_path: release_notes.md
+          files: dist-release/*
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # STAGE 4: DOCKER PUBLISH
+  # ============================================================================
+  docker:
+    name: Build & Push Multi-Arch Docker Image
+    needs: [check_release, release]
+    if: needs.check_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.check_release.outputs.tag }}
+            type=raw,value=${{ needs.check_release.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.check_release.outputs.tag }}

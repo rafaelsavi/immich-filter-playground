@@ -1,7 +1,10 @@
 .PHONY: all build run test clean docker-build help
 
 BINARY_NAME=immich-filter-playground
-VERSION?=1.3.1
+VERSION ?= $(shell grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+ifeq ($(VERSION),)
+VERSION = 1.3.1
+endif
 
 all: test build
 

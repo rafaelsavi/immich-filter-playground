@@ -1,0 +1,14 @@
+#!/bin/sh
+# Git pre-push hook running Go vet and unit tests
+
+echo "=========================================="
+echo "Running Pre-Push Quality Verification (Go)"
+echo "=========================================="
+
+go vet ./... || { echo "❌ go vet failed"; exit 1; }
+go test -v ./... || { echo "❌ go test failed"; exit 1; }
+
+echo "=========================================="
+echo "✅ All Go checks passed! Proceeding with push."
+echo "=========================================="
+exit 0

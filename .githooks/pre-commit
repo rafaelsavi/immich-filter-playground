@@ -1,0 +1,17 @@
+#!/bin/sh
+# Git pre-commit hook checking privacy & secrets prevention.
+
+echo "=========================================="
+echo "Running Pre-Commit Privacy & Secrets Check"
+echo "=========================================="
+
+# Ensure config.yaml or private files are not staged
+STAGED_CONFIG=$(git diff --cached --name-only | grep -E '^config\.yaml$|^\.env$|^profiles\.json$')
+if [ -n "$STAGED_CONFIG" ]; then
+    echo "❌ Error: Attempting to commit private configuration/credential file: $STAGED_CONFIG"
+    echo "Unstage this file before committing: git reset HEAD <file>"
+    exit 1
+fi
+
+echo "✅ Privacy & secrets check passed!"
+exit 0

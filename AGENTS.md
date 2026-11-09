@@ -36,8 +36,9 @@ This document provides context, architectural constraints, and standards for AI 
   `-ldflags="-s -w -X main.version=${VERSION}"`
 - **Zero-Effort Automated Release**:
   - Never manually run `git tag` or publish GitHub releases manually.
-  - Bumping `version` in `pyproject.toml` and documenting changes in `CHANGELOG.md` automatically triggers the GitHub Actions CI/CD pipeline on push to `main`.
+  - Bumping `version` in `pyproject.toml` and documenting changes in `CHANGELOG.md` automatically triggers the GitHub Actions CI/CD pipeline on push to `main` (or upon merging a Pull Request).
   - The pipeline automatically verifies tests, creates and pushes the Git tag `vX.Y.Z`, compiles cross-platform binaries (Linux x86/ARM, macOS x86/ARM, Windows x86), publishes the GitHub Release, and builds the multi-arch Docker image.
+  - **Protected Branch Protocol**: If direct pushes to `main` are restricted, work on a dedicated branch (`git checkout -b feat/...`), commit changes atomically including the version bump and changelog entry, push the branch, and open a Pull Request. Merging into `main` automatically executes the release pipeline.
 
 ---
 

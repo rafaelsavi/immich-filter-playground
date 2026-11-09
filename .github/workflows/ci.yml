@@ -177,7 +177,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a ${{ needs.check_release.outputs.tag }} -m "Release ${{ needs.check_release.outputs.tag }}"
-          git push origin ${{ needs.check_release.outputs.tag }}
+          git push origin ${{ needs.check_release.outputs.tag }} || echo "::warning::Direct git push failed; tag will be created by action-gh-release."
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

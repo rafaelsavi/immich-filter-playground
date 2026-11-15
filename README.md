@@ -74,7 +74,18 @@ services:
       - IMMICH_EXTERNAL_URL=https://photos.yourdomain.com
       - IMMICH_ACCOUNTS=alice:your_immich_api_key_here
       # Or multiple accounts: - IMMICH_ACCOUNTS=alice:key1,bob:key2
+      # Store server-side search profiles in the named volume below
+      - PLAYGROUND_PROFILES_FILE=/data/profiles.json
+    volumes:
+      - profiles:/data
+
+volumes:
+  profiles:
 ```
+
+The named `profiles` volume keeps server-side saved search profiles when the container is recreated. Without a volume, profiles are written to the container's filesystem and may be lost when it is replaced. Alternatively, bind-mount a host directory and set `PLAYGROUND_PROFILES_FILE` to a file within it.
+
+The Immich metadata cache (people, albums, tags, and locations) is kept in memory and expires after 15–30 minutes. It is cleared when the app restarts, so it does not need a volume. The browser also keeps a local fallback copy of profiles in that browser's local storage.
 
 Then start the container:
 ```bash

@@ -103,7 +103,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	if err := json.Unmarshal(recHealth.Body.Bytes(), &healthResp); err != nil {
 		t.Fatalf("unmarshaling health response: %v", err)
 	}
-	if healthResp.Status != "ok" || !healthResp.Configured || healthResp.Version != "1.3.1" {
+	if healthResp.Status != "ok" || !healthResp.Configured || healthResp.Version != "1.3.2" {
 		t.Errorf("unexpected health response: %+v", healthResp)
 	}
 

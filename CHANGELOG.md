@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.3.2] - 2026-11-15
+
+### Changed
+- **Docker Persistence Documentation**: Clarified that the Immich metadata cache is in memory and added a named Docker volume for persistent saved search profiles.
+
 ## [1.3.1] - 2026-11-06
 
 ### Fixed

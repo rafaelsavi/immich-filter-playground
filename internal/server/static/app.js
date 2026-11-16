@@ -45,6 +45,7 @@ const PROFILE_HISTORY_LIMIT = 50;
 let profileHistoryApplying = false;
 let profileHistorySaveChain = Promise.resolve();
 const profileHistorySaveTimers = new Map();
+let saveProfileAsCopy = false;
 
 // ==========================================================================
 // Utilities
@@ -1650,6 +1651,17 @@ function renderProfilesDropdown() {
 	if (deleteBtn) {
 		deleteBtn.hidden = !(state.activeProfileId && state.activeProfileId.startsWith('prof_'));
 	}
+	updateProfileActionLabels();
+}
+
+function updateProfileActionLabels() {
+	const saveButton = document.getElementById('btn-save-profile');
+	if (!saveButton) return;
+	const hasActiveProfile = !!(state.activeProfileId && state.activeProfileId.startsWith('prof_'));
+	saveButton.innerHTML = hasActiveProfile ? '<span>✏️ Rename</span>' : '<span>💾 Save as Profile</span>';
+	saveButton.title = hasActiveProfile
+		? 'Rename the selected profile; filter edits are saved automatically'
+		: 'Save the current filter as a new profile';
 }
 
 function getProfileSnapshot() {
@@ -1859,6 +1871,7 @@ function redoProfileHistory() {
 
 function applyProfile(profileId) {
 	state.activeProfileId = profileId;
+	updateProfileActionLabels();
 	const deleteBtn = document.getElementById('btn-delete-profile');
 	const selectEl = document.getElementById('profile-select');
 	if (selectEl) selectEl.value = profileId;
@@ -1925,17 +1938,30 @@ function applyProfile(profileId) {
 	}
 }
 
-function openSaveProfileModal() {
+function openSaveProfileModal(asCopy = false) {
 	const dialog = document.getElementById('save-profile-dialog');
 	const nameInput = document.getElementById('save-profile-name');
 	if (!dialog || !nameInput) return;
+	saveProfileAsCopy = asCopy;
 
 	let currentName = '';
 	if (state.activeProfileId && state.activeProfileId.startsWith('prof_')) {
 		const cur = state.profiles.find(p => p.id === state.activeProfileId);
 		if (cur) currentName = cur.name;
 	}
-	nameInput.value = currentName;
+	nameInput.value = asCopy ? (currentName ? `${currentName} copy` : '') : currentName;
+	const dialogTitle = document.getElementById('save-profile-dialog-title');
+	const confirmButton = document.getElementById('btn-confirm-save-profile');
+	if (dialogTitle) {
+		dialogTitle.textContent = asCopy
+			? '⧉ Save Profile as Copy'
+			: (state.activeProfileId ? '✏️ Rename Profile' : '💾 Save Search Profile');
+	}
+	if (confirmButton) {
+		confirmButton.textContent = asCopy
+			? 'Save Copy'
+			: (state.activeProfileId ? 'Rename Profile' : 'Save Profile');
+	}
 
 	const modeEl = document.getElementById('profile-summary-mode');
 	const userEl = document.getElementById('profile-summary-user');
@@ -1959,8 +1985,13 @@ async function handleSaveProfileSubmit(e) {
 	const filterEditor = document.getElementById('filter-json-editor');
 	const rawFilterJson = filterEditor ? filterEditor.value : '{}';
 
-	const id = (state.activeProfileId && state.activeProfileId.startsWith('prof_')) ? state.activeProfileId : '';
+	const id = !saveProfileAsCopy && state.activeProfileId && state.activeProfileId.startsWith('prof_')
+		? state.activeProfileId
+		: '';
 	const existingProfile = state.profiles.find(p => p.id === id);
+	const copiedFrom = saveProfileAsCopy
+		? (state.profiles.find(p => p.id === state.activeProfileId) || {}).name
+		: '';
 	const profileData = {
 		id: id,
 		name: name,
@@ -1974,7 +2005,7 @@ async function handleSaveProfileSubmit(e) {
 		includeVideos: state.includeVideos,
 		includeArchived: state.includeArchived,
 		history: (existingProfile || {}).history || [{
-			label: 'Profile saved',
+			label: copiedFrom ? `Copied from ${copiedFrom}` : 'Profile saved',
 			timestamp: new Date().toISOString(),
 			snapshot: getProfileSnapshot()
 		}],
@@ -2018,6 +2049,7 @@ async function handleSaveProfileSubmit(e) {
 	} catch (e) {}
 
 	state.activeProfileId = profileData.id;
+	saveProfileAsCopy = false;
 	if (dialog) dialog.close();
 	renderProfilesDropdown();
 	renderProfileHistory();
@@ -2159,6 +2191,11 @@ document.addEventListener('DOMContentLoaded', () => {
 		saveProfileBtn.addEventListener('click', () => openSaveProfileModal());
 	}
 
+	const copyProfileBtn = document.getElementById('btn-copy-profile');
+	if (copyProfileBtn) {
+		copyProfileBtn.addEventListener('click', () => openSaveProfileModal(true));
+	}
+
 	const deleteProfileBtn = document.getElementById('btn-delete-profile');
 	if (deleteProfileBtn) {
 		deleteProfileBtn.addEventListener('click', () => handleDeleteProfile());
@@ -2178,9 +2215,14 @@ document.addEventListener('DOMContentLoaded', () => {
 	const cancelSaveProfileBtn = document.getElementById('btn-cancel-save-profile');
 	if (cancelSaveProfileBtn) {
 		cancelSaveProfileBtn.addEventListener('click', () => {
+			saveProfileAsCopy = false;
 			const dialog = document.getElementById('save-profile-dialog');
 			if (dialog) dialog.close();
 		});
+	}
+	const saveProfileDialog = document.getElementById('save-profile-dialog');
+	if (saveProfileDialog) {
+		saveProfileDialog.addEventListener('close', () => { saveProfileAsCopy = false; });
 	}
 
 	// Code Tabs (Filter JSON / Request Body / cURL)

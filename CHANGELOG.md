@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.3.3] - 2026-11-16
+
+### Added
+- **Per-Profile Undo/Redo History**: Added a modification history panel with undo and redo controls, persisted with each saved profile.
+
+### Changed
+- **Docker Profile Persistence**: Configured the default Compose setup to store profiles and their history in a named volume.
+
 ## [1.3.2] - 2026-11-15
 
 ### Changed

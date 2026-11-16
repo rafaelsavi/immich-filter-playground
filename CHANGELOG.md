@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.3.4] - 2026-11-16
+
+### Changed
+- **Profile Copy Workflow**: Clarified the rename action and added an explicit Save as Copy flow for creating independent profile versions.
+
 ## [1.3.3] - 2026-11-16
 
 ### Added

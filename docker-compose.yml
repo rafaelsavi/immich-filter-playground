@@ -20,8 +20,10 @@ services:
       - PLAYGROUND_SEARCH_MODE=random
       - PLAYGROUND_INCLUDE_VIDEOS=true
       - PLAYGROUND_INCLUDE_ARCHIVED=false
+      - PLAYGROUND_PROFILES_FILE=/data/profiles.json
 
-    # Optional: mount local config.yaml and persistent profiles
-    # volumes:
-    #   - ./config.yaml:/app/config.yaml:ro
-    #   - ./profiles.json:/app/profiles.json
+    volumes:
+      - profiles:/data
+
+volumes:
+  profiles:

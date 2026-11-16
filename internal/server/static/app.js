@@ -41,6 +41,10 @@ const state = {
 let searchDebounceTimer = null;
 let activeSearchController = null;
 let searchSequenceId = 0;
+const PROFILE_HISTORY_LIMIT = 50;
+let profileHistoryApplying = false;
+let profileHistorySaveChain = Promise.resolve();
+const profileHistorySaveTimers = new Map();
 
 // ==========================================================================
 // Utilities
@@ -983,6 +987,7 @@ function updateRequestAndCurlPreviews() {
 function syncFromRuleTree(opts = {}) {
 	const ast = compileGroupToAST(state.ruleTree);
 	updateCodeViewers(ast, opts.skipFilterEditor);
+	if (!profileHistoryApplying) recordProfileHistory();
 	scheduleLiveSearch(JSON.stringify(ast));
 }
 
@@ -1647,6 +1652,211 @@ function renderProfilesDropdown() {
 	}
 }
 
+function getProfileSnapshot() {
+	return {
+		filterJson: JSON.stringify(compileGroupToAST(state.ruleTree)),
+		ruleTree: JSON.parse(JSON.stringify(state.ruleTree)),
+		searchMode: state.searchMode,
+		user: state.selectedUser,
+		limit: state.sampleSize,
+		orderByField: state.orderByField,
+		orderByDirection: state.orderByDirection,
+		includeVideos: state.includeVideos,
+		includeArchived: state.includeArchived
+	};
+}
+
+function getHistoryLabel(previous, next) {
+	if (JSON.stringify(previous.ruleTree) !== JSON.stringify(next.ruleTree)) return 'Updated filter';
+	if (previous.searchMode !== next.searchMode) return 'Changed search mode';
+	if (previous.user !== next.user) return 'Changed target account';
+	if (previous.orderByField !== next.orderByField || previous.orderByDirection !== next.orderByDirection) return 'Changed sort order';
+	if (previous.limit !== next.limit) return 'Changed display limit';
+	if (previous.includeVideos !== next.includeVideos || previous.includeArchived !== next.includeArchived) return 'Changed media options';
+	return 'Updated profile';
+}
+
+function setProfileHistoryStatus(message, failed = false) {
+	const status = document.getElementById('profile-history-status');
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle('error', failed);
+}
+
+function renderProfileHistory() {
+	const list = document.getElementById('profile-history-list');
+	const undoButton = document.getElementById('btn-undo-profile');
+	const redoButton = document.getElementById('btn-redo-profile');
+	const profile = state.profiles.find(p => p.id === state.activeProfileId);
+	if (!list || !undoButton || !redoButton) return;
+
+	list.replaceChildren();
+	if (!profile || !Array.isArray(profile.history) || profile.history.length === 0) {
+		undoButton.disabled = true;
+		redoButton.disabled = true;
+		setProfileHistoryStatus('Select a saved profile to track changes.');
+		return;
+	}
+
+	const historyIndex = Math.max(0, Math.min(profile.historyIndex || 0, profile.history.length - 1));
+	undoButton.disabled = historyIndex <= 0;
+	redoButton.disabled = historyIndex >= profile.history.length - 1;
+	for (let i = profile.history.length - 1; i >= 0; i--) {
+		const entry = profile.history[i];
+		const item = document.createElement('li');
+		const button = document.createElement('button');
+		const label = document.createElement('span');
+		const time = document.createElement('time');
+		button.type = 'button';
+		button.className = 'profile-history-entry' + (i === historyIndex ? ' active' : '');
+		button.setAttribute('aria-current', i === historyIndex ? 'true' : 'false');
+		label.textContent = entry.label || 'Updated profile';
+		const date = new Date(entry.timestamp);
+		time.textContent = Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+		button.append(label, time);
+		button.addEventListener('click', () => restoreProfileHistory(i));
+		item.appendChild(button);
+		list.appendChild(item);
+	}
+}
+
+function persistActiveProfile(profile) {
+	const profileId = profile.id;
+	clearTimeout(profileHistorySaveTimers.get(profileId));
+	profileHistorySaveTimers.set(profileId, setTimeout(() => {
+		profileHistorySaveTimers.delete(profileId);
+		const payload = JSON.stringify(profile);
+		profileHistorySaveChain = profileHistorySaveChain.then(async () => {
+			const response = await fetch('/api/profiles', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: payload
+			});
+			if (!response.ok) {
+				throw new Error(`Profile save failed (${response.status})`);
+			}
+			if (state.activeProfileId === profileId) {
+				setProfileHistoryStatus('Saved to server profile storage.');
+			}
+		}).catch(err => {
+			console.warn('Could not persist profile history:', err);
+			if (state.activeProfileId === profileId) {
+				setProfileHistoryStatus('Server save failed; changes may not survive reload.', true);
+			}
+		});
+	}, 350));
+}
+
+function recordProfileHistory() {
+	if (!state.activeProfileId) {
+		renderProfileHistory();
+		return;
+	}
+	const profile = state.profiles.find(p => p.id === state.activeProfileId);
+	if (!profile) return;
+
+	if (!Array.isArray(profile.history) || profile.history.length === 0) {
+		profile.history = [{
+			label: 'Profile saved',
+			timestamp: new Date().toISOString(),
+			snapshot: getProfileSnapshot()
+		}];
+		profile.historyIndex = 0;
+	}
+
+	const historyIndex = Math.max(0, Math.min(profile.historyIndex || 0, profile.history.length - 1));
+	const snapshot = getProfileSnapshot();
+	const previous = profile.history[historyIndex].snapshot;
+	if (JSON.stringify(previous) === JSON.stringify(snapshot)) return;
+
+	const wasAtHistoryEnd = historyIndex === profile.history.length - 1;
+	profile.history.splice(historyIndex + 1);
+	const label = getHistoryLabel(previous, snapshot);
+	const now = new Date();
+	const lastEntry = profile.history[profile.history.length - 1];
+	if (wasAtHistoryEnd && lastEntry && lastEntry.label === label && now.getTime() - new Date(lastEntry.timestamp).getTime() < 750) {
+		lastEntry.timestamp = now.toISOString();
+		lastEntry.snapshot = snapshot;
+	} else {
+		profile.history.push({
+			label,
+			timestamp: now.toISOString(),
+			snapshot
+		});
+	}
+	if (profile.history.length > PROFILE_HISTORY_LIMIT) {
+		profile.history.splice(0, profile.history.length - PROFILE_HISTORY_LIMIT);
+	}
+	profile.historyIndex = profile.history.length - 1;
+	Object.assign(profile, snapshot);
+
+	try {
+		localStorage.setItem('immich_search_profiles', JSON.stringify(state.profiles));
+	} catch (err) {
+		console.warn('Could not update local profile fallback:', err);
+	}
+	renderProfileHistory();
+	setProfileHistoryStatus('Saving profile history…');
+	persistActiveProfile(profile);
+}
+
+function applyProfileSnapshot(snapshot) {
+	if (!snapshot || !snapshot.ruleTree || snapshot.ruleTree.type !== 'group') {
+		setProfileHistoryStatus('Cannot restore an invalid history entry.', true);
+		return false;
+	}
+	state.ruleTree = JSON.parse(JSON.stringify(snapshot.ruleTree));
+	state.searchMode = snapshot.searchMode || 'random';
+	state.selectedUser = snapshot.user || '';
+	state.sampleSize = snapshot.limit || 24;
+	state.orderByField = snapshot.orderByField || 'localDateTime';
+	state.orderByDirection = snapshot.orderByDirection || 'desc';
+	state.includeVideos = snapshot.includeVideos !== false;
+	state.includeArchived = !!snapshot.includeArchived;
+
+	const accountSelect = document.getElementById('account-select');
+	if (accountSelect) accountSelect.value = state.selectedUser;
+	updateAccountSwitcherLabel();
+	renderAccountMenu();
+	syncToolbarControls();
+	renderRuleTree();
+	syncFromRuleTree();
+	return true;
+}
+
+function restoreProfileHistory(index) {
+	const profile = state.profiles.find(p => p.id === state.activeProfileId);
+	if (!profile || !Array.isArray(profile.history) || !profile.history[index]) return;
+
+	profileHistoryApplying = true;
+	let restored = false;
+	try {
+		restored = applyProfileSnapshot(profile.history[index].snapshot);
+	} finally {
+		profileHistoryApplying = false;
+	}
+	if (!restored) return;
+	profile.historyIndex = index;
+	Object.assign(profile, getProfileSnapshot());
+	renderProfileHistory();
+	setProfileHistoryStatus('Saving profile history…');
+	persistActiveProfile(profile);
+}
+
+function undoProfileHistory() {
+	const profile = state.profiles.find(p => p.id === state.activeProfileId);
+	if (profile && (profile.historyIndex || 0) > 0) {
+		restoreProfileHistory(profile.historyIndex - 1);
+	}
+}
+
+function redoProfileHistory() {
+	const profile = state.profiles.find(p => p.id === state.activeProfileId);
+	if (profile && Array.isArray(profile.history) && (profile.historyIndex || 0) < profile.history.length - 1) {
+		restoreProfileHistory(profile.historyIndex + 1);
+	}
+}
+
 function applyProfile(profileId) {
 	state.activeProfileId = profileId;
 	const deleteBtn = document.getElementById('btn-delete-profile');
@@ -1658,41 +1868,60 @@ function applyProfile(profileId) {
 	}
 
 	if (!profileId) {
+		renderProfileHistory();
 		return;
 	}
 
 	// Load custom saved profile
 	const prof = state.profiles.find(p => p.id === profileId);
 	if (prof) {
-		if (prof.ruleTree && typeof prof.ruleTree === 'object') {
-			state.ruleTree = JSON.parse(JSON.stringify(prof.ruleTree));
-		} else if (prof.filterJson) {
-			try {
-				const ast = JSON.parse(prof.filterJson);
-				const group = astToRuleGroup(ast);
-				if (group) state.ruleTree = group;
-			} catch (e) {
-				console.warn('Error parsing profile filterJson:', e);
+		profileHistoryApplying = true;
+		try {
+			if (prof.ruleTree && typeof prof.ruleTree === 'object') {
+				state.ruleTree = JSON.parse(JSON.stringify(prof.ruleTree));
+			} else if (prof.filterJson) {
+				try {
+					const ast = JSON.parse(prof.filterJson);
+					const group = astToRuleGroup(ast);
+					if (group) state.ruleTree = group;
+				} catch (e) {
+					console.warn('Error parsing profile filterJson:', e);
+				}
 			}
+
+			if (prof.searchMode) state.searchMode = prof.searchMode;
+			if (prof.orderByField) state.orderByField = prof.orderByField;
+			if (prof.orderByDirection) state.orderByDirection = prof.orderByDirection;
+			if (prof.limit && prof.limit > 0) state.sampleSize = prof.limit;
+			if (prof.includeVideos !== undefined) state.includeVideos = !!prof.includeVideos;
+			if (prof.includeArchived !== undefined) state.includeArchived = !!prof.includeArchived;
+			if (prof.user !== undefined) {
+				state.selectedUser = prof.user;
+				const accSelect = document.getElementById('account-select');
+				if (accSelect) accSelect.value = prof.user;
+				updateAccountSwitcherLabel();
+				renderAccountMenu();
+			}
+
+			syncToolbarControls();
+			renderRuleTree();
+			syncFromRuleTree();
+		} finally {
+			profileHistoryApplying = false;
 		}
 
-		if (prof.searchMode) state.searchMode = prof.searchMode;
-		if (prof.orderByField) state.orderByField = prof.orderByField;
-		if (prof.orderByDirection) state.orderByDirection = prof.orderByDirection;
-		if (prof.limit && prof.limit > 0) state.sampleSize = prof.limit;
-		if (prof.includeVideos !== undefined) state.includeVideos = !!prof.includeVideos;
-		if (prof.includeArchived !== undefined) state.includeArchived = !!prof.includeArchived;
-		if (prof.user !== undefined) {
-			state.selectedUser = prof.user;
-			const accSelect = document.getElementById('account-select');
-			if (accSelect) accSelect.value = prof.user;
-			updateAccountSwitcherLabel();
-			renderAccountMenu();
+		if (!Array.isArray(prof.history) || prof.history.length === 0) {
+			prof.history = [{
+				label: 'Profile saved',
+				timestamp: prof.updatedAt || new Date().toISOString(),
+				snapshot: getProfileSnapshot()
+			}];
+			prof.historyIndex = 0;
+		} else {
+			prof.historyIndex = Math.max(0, Math.min(prof.historyIndex || 0, prof.history.length - 1));
 		}
-
-		syncToolbarControls();
-		renderRuleTree();
-		syncFromRuleTree();
+		renderProfileHistory();
+		setProfileHistoryStatus('History is saved with the profile after each change.');
 	}
 }
 
@@ -1731,6 +1960,7 @@ async function handleSaveProfileSubmit(e) {
 	const rawFilterJson = filterEditor ? filterEditor.value : '{}';
 
 	const id = (state.activeProfileId && state.activeProfileId.startsWith('prof_')) ? state.activeProfileId : '';
+	const existingProfile = state.profiles.find(p => p.id === id);
 	const profileData = {
 		id: id,
 		name: name,
@@ -1742,21 +1972,33 @@ async function handleSaveProfileSubmit(e) {
 		orderByField: state.orderByField,
 		orderByDirection: state.orderByDirection,
 		includeVideos: state.includeVideos,
-		includeArchived: state.includeArchived
+		includeArchived: state.includeArchived,
+		history: (existingProfile || {}).history || [{
+			label: 'Profile saved',
+			timestamp: new Date().toISOString(),
+			snapshot: getProfileSnapshot()
+		}],
+		historyIndex: (existingProfile || {}).historyIndex || 0
 	};
 
+	if (id && profileHistorySaveTimers.has(id)) {
+		clearTimeout(profileHistorySaveTimers.get(id));
+		profileHistorySaveTimers.delete(id);
+	}
+	await profileHistorySaveChain;
+	let savedToServer = false;
 	try {
 		const resp = await fetch('/api/profiles', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(profileData)
 		});
-		if (resp.ok) {
-			const data = await resp.json();
-			if (data.profile) {
-				profileData.id = data.profile.id;
-			}
+		if (!resp.ok) throw new Error(`Profile save failed (${resp.status})`);
+		const data = await resp.json();
+		if (data.profile) {
+			profileData.id = data.profile.id;
 		}
+		savedToServer = true;
 	} catch (err) {
 		console.warn('Saving profile to server failed, using local storage:', err);
 		if (!profileData.id) {
@@ -1778,6 +2020,8 @@ async function handleSaveProfileSubmit(e) {
 	state.activeProfileId = profileData.id;
 	if (dialog) dialog.close();
 	renderProfilesDropdown();
+	renderProfileHistory();
+	setProfileHistoryStatus(savedToServer ? 'Saved to server profile storage.' : 'Server save failed; profile is only in this browser.', !savedToServer);
 }
 
 async function handleDeleteProfile() {
@@ -1789,6 +2033,11 @@ async function handleDeleteProfile() {
 	}
 
 	const idToDelete = state.activeProfileId;
+	if (profileHistorySaveTimers.has(idToDelete)) {
+		clearTimeout(profileHistorySaveTimers.get(idToDelete));
+		profileHistorySaveTimers.delete(idToDelete);
+	}
+	await profileHistorySaveChain;
 	try {
 		await fetch(`/api/profiles/${encodeURIComponent(idToDelete)}`, {
 			method: 'DELETE'
@@ -1809,6 +2058,22 @@ async function handleDeleteProfile() {
 document.addEventListener('DOMContentLoaded', () => {
 	setupDialogLightDismissFallback();
 	bootstrapApp();
+
+	document.addEventListener('keydown', (event) => {
+		if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+		const target = event.target;
+		if (target instanceof Element && target.matches('input, textarea, select, [contenteditable="true"]')) return;
+		const activeProfile = state.profiles.find(p => p.id === state.activeProfileId);
+		if (!activeProfile || !Array.isArray(activeProfile.history) || activeProfile.history.length < 2) return;
+		if (event.key.toLowerCase() === 'z') {
+			event.preventDefault();
+			if (event.shiftKey) redoProfileHistory();
+			else undoProfileHistory();
+		} else if (event.key.toLowerCase() === 'y') {
+			event.preventDefault();
+			redoProfileHistory();
+		}
+	});
 
 	// Close dropdowns when clicking outside value box
 	document.addEventListener('click', (e) => {
@@ -1898,6 +2163,12 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (deleteProfileBtn) {
 		deleteProfileBtn.addEventListener('click', () => handleDeleteProfile());
 	}
+
+	const undoProfileBtn = document.getElementById('btn-undo-profile');
+	if (undoProfileBtn) undoProfileBtn.addEventListener('click', undoProfileHistory);
+
+	const redoProfileBtn = document.getElementById('btn-redo-profile');
+	if (redoProfileBtn) redoProfileBtn.addEventListener('click', redoProfileHistory);
 
 	const saveProfileForm = document.getElementById('save-profile-form');
 	if (saveProfileForm) {
@@ -2014,6 +2285,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			const [field, dir] = sortSelect.value.split(':');
 			state.orderByField = field || 'localDateTime';
 			state.orderByDirection = dir || 'desc';
+			recordProfileHistory();
 			runLiveSearch();
 		});
 	}
@@ -2023,6 +2295,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (vidToggle) {
 		vidToggle.addEventListener('change', () => {
 			state.includeVideos = vidToggle.checked;
+			recordProfileHistory();
 			runLiveSearch();
 		});
 	}
@@ -2031,6 +2304,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (archToggle) {
 		archToggle.addEventListener('change', () => {
 			state.includeArchived = archToggle.checked;
+			recordProfileHistory();
 			runLiveSearch();
 		});
 	}
@@ -2040,6 +2314,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		btn.addEventListener('click', () => {
 			state.sampleSize = parseInt(btn.dataset.limit, 10) || 24;
 			syncToolbarControls();
+			recordProfileHistory();
 			runLiveSearch();
 		});
 	});
@@ -2053,6 +2328,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			else if (state.sampleSize < 144) state.sampleSize = 144;
 			else state.sampleSize = 200;
 			syncToolbarControls();
+			recordProfileHistory();
 			runLiveSearch();
 		});
 	}

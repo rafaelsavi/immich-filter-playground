@@ -117,7 +117,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	}
 
 	// 4b. Save a profile
-	saveBody := `{"name":"Tokyo Favorites","searchMode":"random","filterJson":"{\"country\":{\"in\":[\"Japan\"]}}"}`
+	saveBody := `{"name":"Tokyo Favorites","searchMode":"random","filterJson":"{\"country\":{\"in\":[\"Japan\"]}}","history":[{"label":"Profile saved","timestamp":"2026-11-16T16:00:00Z","snapshot":{"searchMode":"random","ruleTree":{"id":"root","type":"group","combiner":"AND","children":[]}}}],"historyIndex":0}`
 	reqProfSave := httptest.NewRequest(http.MethodPost, "/api/profiles", bytes.NewBufferString(saveBody))
 	recProfSave := httptest.NewRecorder()
 	srv.ServeHTTP(recProfSave, reqProfSave)
@@ -146,6 +146,18 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	if len(listResp.Profiles) != 1 || listResp.Profiles[0].ID != saveResp.Profile.ID {
 		t.Fatalf("expected 1 profile in list, got %+v", listResp.Profiles)
 	}
+	if len(listResp.Profiles[0].History) != 1 || listResp.Profiles[0].HistoryIndex != 0 {
+		t.Fatalf("expected profile history to persist, got %+v", listResp.Profiles[0])
+	}
+	var historySnapshot struct {
+		SearchMode string `json:"searchMode"`
+	}
+	if err := json.Unmarshal(listResp.Profiles[0].History[0].Snapshot, &historySnapshot); err != nil {
+		t.Fatalf("unmarshaling profile history snapshot: %v", err)
+	}
+	if historySnapshot.SearchMode != "random" {
+		t.Fatalf("unexpected profile history snapshot: %+v", historySnapshot)
+	}
 
 	// 4d. Delete profile
 	reqProfDel := httptest.NewRequest(http.MethodDelete, "/api/profiles/"+saveResp.Profile.ID, nil)
@@ -158,8 +170,6 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	// Clean up temp test profiles file if created
 	defer os.Remove(cfg.Server.ProfilesFile)
 }
-
-
 
 func TestBootstrapWithMultipleAccounts(t *testing.T) {
 	mockImmich := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

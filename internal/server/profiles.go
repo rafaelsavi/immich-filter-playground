@@ -12,20 +12,28 @@ import (
 
 // SearchProfile represents a saved search configuration.
 type SearchProfile struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	IsDefault        bool            `json:"isDefault,omitempty"`
-	FilterJSON       string          `json:"filterJson"`
-	RuleTree         json.RawMessage `json:"ruleTree,omitempty"`
-	SearchMode       string          `json:"searchMode,omitempty"`
-	User             string          `json:"user,omitempty"`
-	Limit            int             `json:"limit,omitempty"`
-	OrderByField     string          `json:"orderByField,omitempty"`
-	OrderByDirection string          `json:"orderByDirection,omitempty"`
-	IncludeVideos    *bool           `json:"includeVideos,omitempty"`
-	IncludeArchived  *bool           `json:"includeArchived,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	IsDefault        bool                  `json:"isDefault,omitempty"`
+	FilterJSON       string                `json:"filterJson"`
+	RuleTree         json.RawMessage       `json:"ruleTree,omitempty"`
+	History          []ProfileHistoryEntry `json:"history,omitempty"`
+	HistoryIndex     int                   `json:"historyIndex"`
+	SearchMode       string                `json:"searchMode,omitempty"`
+	User             string                `json:"user,omitempty"`
+	Limit            int                   `json:"limit,omitempty"`
+	OrderByField     string                `json:"orderByField,omitempty"`
+	OrderByDirection string                `json:"orderByDirection,omitempty"`
+	IncludeVideos    *bool                 `json:"includeVideos,omitempty"`
+	IncludeArchived  *bool                 `json:"includeArchived,omitempty"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
+}
+
+type ProfileHistoryEntry struct {
+	Label     string          `json:"label"`
+	Timestamp time.Time       `json:"timestamp"`
+	Snapshot  json.RawMessage `json:"snapshot"`
 }
 
 type profileStore struct {

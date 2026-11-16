@@ -96,6 +96,20 @@
 					</div>
 
 					<div id="rule-tree-mount" class="rule-tree-container"></div>
+					<section class="profile-history-panel" aria-labelledby="profile-history-title">
+						<div class="profile-history-header">
+							<div>
+								<h3 id="profile-history-title">Modification History</h3>
+								<span class="panel-subtitle">Changes are saved with the selected profile</span>
+							</div>
+							<div class="profile-history-actions">
+								<button type="button" class="btn btn-xs btn-secondary" id="btn-undo-profile" disabled title="Undo (Ctrl+Z)">↶ Undo</button>
+								<button type="button" class="btn btn-xs btn-secondary" id="btn-redo-profile" disabled title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
+							</div>
+						</div>
+						<div id="profile-history-status" class="profile-history-status" role="status">Select a profile to track changes.</div>
+						<ol id="profile-history-list" class="profile-history-list" aria-label="Profile modification history"></ol>
+					</section>
 				</div>
 
 				<!-- Card 2: Live JSON Editor & API Payload (Always visible below the tree!) -->

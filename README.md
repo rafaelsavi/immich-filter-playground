@@ -20,6 +20,7 @@ A modern, standalone visual filter designer and testing playground for the **Imm
   - Save your favourite search filters and query parameters into named profiles.
   - Quick-switch between custom saved profiles via a dedicated dropdown.
   - Profiles remember rule trees, search modes, target user accounts, sort settings, and video/archive options.
+  - Per-profile modification history with undo/redo, persisted alongside profiles.
   - Synchronized via backend API (`/api/profiles`) with seamless local browser persistence fallback.
 
 - **⚡ Simultaneous Two-Way JSON Editor**:
@@ -83,7 +84,9 @@ volumes:
   profiles:
 ```
 
-The named `profiles` volume keeps server-side saved search profiles when the container is recreated. Without a volume, profiles are written to the container's filesystem and may be lost when it is replaced. Alternatively, bind-mount a host directory and set `PLAYGROUND_PROFILES_FILE` to a file within it.
+The repository's `docker-compose.yml` configures the named `profiles` volume by default, keeping server-side profiles and their modification history when the container is recreated. Without a volume, profiles are written to the container's filesystem and may be lost when it is replaced. Alternatively, bind-mount a host directory and set `PLAYGROUND_PROFILES_FILE` to a file within it.
+
+Undo/redo history is stored in the same profile file, so it survives browser reloads and container restarts when that file is on a persistent volume.
 
 The Immich metadata cache (people, albums, tags, and locations) is kept in memory and expires after 15–30 minutes. It is cleared when the app restarts, so it does not need a volume. The browser also keeps a local fallback copy of profiles in that browser's local storage.
 

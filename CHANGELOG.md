@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [Unreleased]
+
+### Added
+- **App Logo**: Added a custom filter-themed SVG logo for the header and browser favicon.
+
 ## [1.6.1] - 2026-11-17
 
 ### Fixed

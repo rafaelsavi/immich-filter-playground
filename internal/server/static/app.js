@@ -1616,12 +1616,14 @@ function applyJsonEditorToTree() {
 
 async function loadProfiles() {
 	let serverProfiles = [];
+	let serverProfilesLoaded = false;
 	try {
 		const resp = await fetch('/api/profiles');
 		if (resp.ok) {
 			const data = await resp.json();
 			if (Array.isArray(data.profiles)) {
 				serverProfiles = data.profiles;
+				serverProfilesLoaded = true;
 			}
 		}
 	} catch (err) {
@@ -1636,14 +1638,25 @@ async function loadProfiles() {
 		}
 	} catch (e) {}
 
+	const serverProfileIds = new Set(serverProfiles.map(profile => profile && profile.id).filter(Boolean));
 	const profileMap = new Map();
 	for (const p of localProfiles) {
-		if (p && p.id) profileMap.set(p.id, p);
+		if (!p || !p.id) continue;
+		if (serverProfilesLoaded && p.deletePending && !serverProfileIds.has(p.id)) continue;
+		if (serverProfilesLoaded && p.serverBacked && !p.pendingSync && !serverProfileIds.has(p.id)) continue;
+		const localProfile = { ...p };
+		if (serverProfileIds.has(p.id)) delete localProfile.deletePending;
+		profileMap.set(p.id, localProfile);
 	}
 	for (const p of serverProfiles) {
 		if (!p || !p.id) continue;
+		const serverProfile = { ...p, serverBacked: true };
 		const localProfile = profileMap.get(p.id);
-		if (!localProfile || !localProfile.pendingSync) profileMap.set(p.id, p);
+		if (!localProfile || !localProfile.pendingSync || !isLocalPendingProfileNewer(localProfile, serverProfile)) {
+			profileMap.set(p.id, serverProfile);
+		} else {
+			localProfile.serverBacked = true;
+		}
 	}
 
 	state.profiles = Array.from(profileMap.values());
@@ -1652,6 +1665,23 @@ async function loadProfiles() {
 		savedProfileSnapshots.set(profile.id, JSON.stringify(profile));
 	}
 	renderProfilesDropdown();
+}
+
+function isLocalPendingProfileNewer(localProfile, serverProfile) {
+	const profileFields = [
+		'id', 'name', 'isDefault', 'filterJson', 'ruleTree', 'history', 'historyIndex',
+		'searchMode', 'user', 'limit', 'orderByField', 'orderByDirection',
+		'includeVideos', 'includeArchived'
+	];
+	const hasSameSavedData = profileFields.every(field =>
+		JSON.stringify(localProfile[field]) === JSON.stringify(serverProfile[field])
+	);
+	if (hasSameSavedData) return false;
+
+	const localUpdatedAt = Date.parse(localProfile.updatedAt || '');
+	const serverUpdatedAt = Date.parse(serverProfile.updatedAt || '');
+	if (!Number.isFinite(localUpdatedAt) || !Number.isFinite(serverUpdatedAt)) return true;
+	return localUpdatedAt >= serverUpdatedAt;
 }
 
 function renderProfilesDropdown() {
@@ -2020,6 +2050,8 @@ async function saveActiveProfile() {
 	if (saveButton) saveButton.disabled = true;
 	setProfileHistoryStatus('Saving profile changes…');
 
+	const previousUpdatedAt = profile.updatedAt;
+	profile.updatedAt = new Date().toISOString();
 	let savedToServer = false;
 	try {
 		const response = await fetch('/api/profiles', {
@@ -2034,12 +2066,17 @@ async function saveActiveProfile() {
 	}
 
 	const wasPendingSync = profile.pendingSync;
-	if (savedToServer) delete profile.pendingSync;
-	else profile.pendingSync = true;
+	if (savedToServer) {
+		delete profile.pendingSync;
+		profile.serverBacked = true;
+	} else {
+		profile.pendingSync = true;
+	}
 	const savedLocally = saveProfilesToLocalStorage();
 	if (!savedToServer && !savedLocally) {
 		if (wasPendingSync === undefined) delete profile.pendingSync;
 		else profile.pendingSync = wasPendingSync;
+		profile.updatedAt = previousUpdatedAt;
 		if (saveButton) saveButton.disabled = false;
 		updateProfileActionLabels();
 		setProfileHistoryStatus('Could not save changes. Check the server or browser storage and try again.', true);
@@ -2383,8 +2420,13 @@ async function handleSaveProfileSubmit(e) {
 			profileData.id = 'prof_' + Date.now();
 		}
 	}
-	if (savedToServer) delete profileData.pendingSync;
-	else profileData.pendingSync = true;
+	if (savedToServer) {
+		delete profileData.pendingSync;
+		profileData.serverBacked = true;
+	} else {
+		profileData.pendingSync = true;
+		if (existingProfile && existingProfile.serverBacked) profileData.serverBacked = true;
+	}
 
 	const nextProfiles = [...state.profiles];
 	if (sourceProfileId && isProfileDirty(sourceProfileId)) {
@@ -2426,11 +2468,36 @@ async function handleSaveProfileSubmit(e) {
 async function handleDeleteProfile() {
 	if (!state.activeProfileId || !state.activeProfileId.startsWith('prof_')) return;
 	const idToDelete = state.activeProfileId;
-	const prof = state.profiles.find(p => p.id === idToDelete);
-	const name = prof ? prof.name : 'this profile';
+	const initialProfile = state.profiles.find(p => p.id === idToDelete);
+	const name = initialProfile ? initialProfile.name : 'this profile';
 	if (isProfileDirty(idToDelete) && !(await resolveUnsavedProfileChanges())) return;
-	if (!state.profiles.some(p => p.id === idToDelete)) return;
+	const profile = state.profiles.find(p => p.id === idToDelete);
+	if (!profile) return;
 	if (!confirm(`Are you sure you want to delete profile "${name}"?`)) {
+		return;
+	}
+
+	const remainingProfiles = state.profiles.filter(p => p.id !== idToDelete);
+	const serverBacked = !!profile.serverBacked || !profile.pendingSync;
+	if (!serverBacked) {
+		if (!saveProfilesToLocalStorage(remainingProfiles)) {
+			setProfileHistoryStatus('Could not delete the browser-only profile from local storage.', true);
+			return;
+		}
+		state.profiles = remainingProfiles;
+		savedProfileSnapshots.delete(idToDelete);
+		state.activeProfileId = '';
+		renderProfilesDropdown();
+		renderProfileHistory();
+		setProfileHistoryStatus('Profile deleted from this browser.');
+		return;
+	}
+
+	const profilesWithDeletionMarker = state.profiles.map(item =>
+		item.id === idToDelete ? { ...item, deletePending: true } : item
+	);
+	if (!saveProfilesToLocalStorage(profilesWithDeletionMarker)) {
+		setProfileHistoryStatus('Could not prepare the profile deletion in browser storage; it was not deleted.', true);
 		return;
 	}
 
@@ -2441,17 +2508,23 @@ async function handleDeleteProfile() {
 		if (!response.ok) throw new Error(`Profile deletion failed (${response.status})`);
 	} catch (err) {
 		console.warn('Could not delete profile from server:', err);
-		setProfileHistoryStatus('Could not delete the profile from server storage.', true);
+		const restoredLocally = saveProfilesToLocalStorage();
+		setProfileHistoryStatus(
+			restoredLocally
+				? 'Could not delete the profile from server storage.'
+				: 'Could not delete the profile, and its browser storage state could not be restored.',
+			true
+		);
 		return;
 	}
 
-	state.profiles = state.profiles.filter(p => p.id !== idToDelete);
+	state.profiles = remainingProfiles;
 	savedProfileSnapshots.delete(idToDelete);
 	const savedLocally = saveProfilesToLocalStorage();
 	state.activeProfileId = '';
 	renderProfilesDropdown();
 	renderProfileHistory();
-	setProfileHistoryStatus(savedLocally ? 'Profile deleted.' : 'Profile deleted from server; browser storage could not be updated.', !savedLocally);
+	setProfileHistoryStatus(savedLocally ? 'Profile deleted.' : 'Profile deleted from server; the saved deletion marker will remove it on reload.', !savedLocally);
 }
 
 function hasPendingProfileSave() {

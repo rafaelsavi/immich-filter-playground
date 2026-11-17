@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [Unreleased]
+
+### Fixed
+- **Profile Deletion Recovery**: Persist a deletion marker before removing server-backed profiles so stale browser copies are discarded after reload.
+- **Offline Profile Sync**: Prefer newer server copies after a successful sync, even when browser storage could not clear its pending-sync copy.
+
 ## [1.6.0] - 2026-11-17
 
 ### Added

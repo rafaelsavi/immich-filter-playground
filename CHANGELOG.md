@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and `main.go`.
 
+## [1.4.1] - 2026-11-17
+
+### Fixed
+- **Repeated Filter Conditions**: Preserve multiple conditions on the same field when compiling the visual rule tree to filter JSON.
+
 ## [1.4.0] - 2026-11-16
 
 ### Added

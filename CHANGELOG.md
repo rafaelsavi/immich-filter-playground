@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [1.6.0] - 2026-11-17
+
+### Added
+- **Manual Profile Saving**: Profile edits and history remain drafts until explicitly saved, with prompts to save, discard, or keep editing before switching profiles.
+- **Browser-Only Save Recovery**: Profiles saved locally while the server is unavailable remain available after reload and can be synced later.
+- **Detailed Modification History**: History entries explain filter additions, removals, value and operator changes, and logic changes.
+
 ## [1.5.0] - 2026-11-17
 
 ### Added

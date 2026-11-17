@@ -54,7 +54,7 @@ func main() {
 		cfg.Server.Port = *portOverride
 	}
 
-	srv := server.New(cfg)
+	srv := server.New(cfg, version)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	httpServer := &http.Server{

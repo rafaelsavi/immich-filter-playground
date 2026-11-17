@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"immich-filter-playground/internal/config"
@@ -21,10 +22,11 @@ type Server struct {
 	client   *immich.Client
 	profiles *profileStore
 	mux      *http.ServeMux
+	version  string
 }
 
 // New creates and configures a new Server instance.
-func New(cfg *config.Config) *Server {
+func New(cfg *config.Config, version string) *Server {
 	s := &Server{
 		cfg: cfg,
 		client: immich.NewClientWithOptions(cfg.Immich.URL, immich.ClientOptions{
@@ -33,6 +35,7 @@ func New(cfg *config.Config) *Server {
 		}),
 		profiles: newProfileStore(cfg.Server.ProfilesFile),
 		mux:      http.NewServeMux(),
+		version:  version,
 	}
 	s.routes()
 	return s
@@ -47,7 +50,7 @@ func (s *Server) routes() {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":     "ok",
 			"configured": s.cfg.IsConfigured(),
-			"version":    "1.3.2",
+			"version":    s.version,
 		})
 	})
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +77,23 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		localDir := filepath.Join("internal", "server", "static")
+		if r.URL.Path == "/" {
+			var index []byte
+			var err error
+			if info, statErr := os.Stat(localDir); statErr == nil && info.IsDir() {
+				index, err = os.ReadFile(filepath.Join(localDir, "index.html"))
+			} else {
+				index, err = fs.ReadFile(staticSub, "index.html")
+			}
+			if err != nil {
+				http.Error(w, "Failed to read application page: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(strings.ReplaceAll(string(index), "{{APP_VERSION}}", s.version)))
+			return
+		}
 		if info, err := os.Stat(localDir); err == nil && info.IsDir() {
 			http.FileServer(http.Dir(localDir)).ServeHTTP(w, r)
 			return
@@ -81,4 +101,3 @@ func (s *Server) routes() {
 		embeddedFileServer.ServeHTTP(w, r)
 	})
 }
-

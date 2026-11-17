@@ -500,7 +500,15 @@ p, blockquote, li, .pretty-text {
 	color: var(--text-primary);
 }
 
+.profile-history-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .profile-history-entry time {
+	flex-shrink: 0;
 	color: var(--text-muted);
 	font-size: 0.68rem;
 	white-space: nowrap;

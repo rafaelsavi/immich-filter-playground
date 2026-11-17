@@ -1692,14 +1692,162 @@ function getProfileSnapshot() {
 	};
 }
 
+function getHistoryTreeNodes(tree) {
+	const nodes = { rules: new Map(), groups: new Map() };
+	function visit(node) {
+		if (!node) return;
+		if (node.type === 'group') {
+			if (node.id) nodes.groups.set(node.id, node);
+			(node.children || []).forEach(visit);
+		} else if (node.type === 'rule' && node.id) {
+			nodes.rules.set(node.id, node);
+		}
+	}
+	visit(tree);
+	return nodes;
+}
+
+function getHistoryFieldLabel(field) {
+	const definition = FIELD_DEFINITIONS.find(item => item.value === field);
+	return definition ? definition.label.replace(/^\S+\s*/, '') : String(field || 'Unknown field').replace(/_/g, ' ');
+}
+
+function getHistoryRuleValue(rule) {
+	if (rule.field === 'date') {
+		if (rule.operator === 'between') {
+			return [rule.dateAfter, rule.dateBefore].filter(Boolean).join(' to ');
+		}
+		return rule.dateAfter || rule.dateBefore || '';
+	}
+	if (Array.isArray(rule.value)) {
+		if (!rule.value.length) return '';
+		const definition = FIELD_DEFINITIONS.find(item => item.value === rule.field);
+		const isIDList = definition && definition.type === 'multi-id';
+		const options = isIDList ? getFieldOptionsList(rule.field) : [];
+		const values = rule.value.map(value => {
+			if (!isIDList) return String(value);
+			const option = options.find(item => item.value === value);
+			return option ? option.label : '';
+		});
+		const missingCount = values.filter(value => !value).length;
+		const availableValues = values.filter(Boolean);
+		if (isIDList && missingCount) {
+			if (!availableValues.length) return `${rule.value.length} selected`;
+			availableValues.push(`${missingCount} other selected`);
+		}
+		const shownValues = availableValues.slice(0, 2);
+		if (availableValues.length > 2) shownValues.push(`+${availableValues.length - 2} more`);
+		return shownValues.join(', ');
+	}
+	if (['favorite', 'has_people', 'has_albums', 'has_tags', 'media_type', 'visibility'].includes(rule.field)) {
+		return '';
+	}
+	return rule.value === null || rule.value === undefined ? '' : String(rule.value);
+}
+
+function getHistoryRuleOperator(rule) {
+	if (rule.field === 'people') {
+		return { all: 'contains all of', any: 'contains any of', none: 'contains none of' }[rule.operator] || '';
+	}
+	if (['albums', 'tags'].includes(rule.field)) {
+		return { any: 'is in any of', all: 'is in all of', none: 'is in none of' }[rule.operator] || '';
+	}
+	if (['country', 'state', 'city', 'camera', 'make', 'lens'].includes(rule.field)) {
+		return { in: 'is one of', notIn: 'is not one of', eq: 'equals' }[rule.operator] || '';
+	}
+	if (['favorite', 'has_people', 'has_albums', 'has_tags'].includes(rule.field)) {
+		return rule.operator === 'false' || rule.value === false ? 'is false' : 'is true';
+	}
+	if (rule.field === 'media_type') {
+		return { IMAGE: 'is photos only', VIDEO: 'is videos only', MOTION: 'is motion / live photos' }[rule.operator] || '';
+	}
+	if (rule.field === 'visibility') {
+		return { timeline: 'is in the timeline', archive: 'is archived', hidden: 'is hidden', locked: 'is locked' }[rule.operator] || '';
+	}
+	const operators = {
+		gte: 'is at least', eq: 'equals', lte: 'is at most',
+		after: 'is on or after', before: 'is on or before', between: 'is between',
+		like: 'contains', notLike: 'does not contain', startsWith: 'starts with',
+		endsWith: 'ends with', matches: 'matches'
+	};
+	return operators[rule.operator] || rule.operator || '';
+}
+
+function describeHistoryRule(rule) {
+	const field = getHistoryFieldLabel(rule.field);
+	const operator = getHistoryRuleOperator(rule);
+	const value = getHistoryRuleValue(rule);
+	const isSelfDescribing = ['favorite', 'has_people', 'has_albums', 'has_tags', 'media_type', 'visibility'].includes(rule.field);
+	if (!value && !isSelfDescribing) return `${field} filter`;
+	return `${field} ${operator}${value ? ` ${value}` : ''}`.trim();
+}
+
+function getHistoryRuleListLabel(action, rules) {
+	if (rules.length === 1) {
+		const rule = rules[0];
+		const description = describeHistoryRule(rule);
+		return description === `${getHistoryFieldLabel(rule.field)} filter`
+			? `${action} ${getHistoryFieldLabel(rule.field)} filter`
+			: `${action} filter: ${description}`;
+	}
+	const names = rules.slice(0, 3).map(rule => getHistoryFieldLabel(rule.field));
+	if (rules.length > names.length) names.push(`+${rules.length - names.length} more`);
+	return `${action} ${rules.length} filters: ${names.join(', ')}`;
+}
+
+function getHistoryFilterLabel(previousTree, nextTree) {
+	const previous = getHistoryTreeNodes(previousTree);
+	const next = getHistoryTreeNodes(nextTree);
+	const added = [...next.rules.values()].filter(rule => !previous.rules.has(rule.id));
+	const removed = [...previous.rules.values()].filter(rule => !next.rules.has(rule.id));
+	const changed = [...next.rules.values()].filter(rule => {
+		const oldRule = previous.rules.get(rule.id);
+		if (!oldRule) return false;
+		const { id: _oldID, ...oldValues } = oldRule;
+		const { id: _newID, ...newValues } = rule;
+		return JSON.stringify(oldValues) !== JSON.stringify(newValues);
+	});
+	const groupChanges = [...next.groups.values()].filter(group => {
+		const oldGroup = previous.groups.get(group.id);
+		return oldGroup && (oldGroup.combiner || 'AND') !== (group.combiner || 'AND');
+	});
+	const changes = [];
+	if (added.length) changes.push(getHistoryRuleListLabel('Added', added));
+	if (removed.length) changes.push(getHistoryRuleListLabel('Removed', removed));
+	if (changed.length === 1) {
+		const oldRule = previous.rules.get(changed[0].id);
+		changes.push(`Changed filter: ${describeHistoryRule(oldRule)} → ${describeHistoryRule(changed[0])}`);
+	} else if (changed.length > 1) {
+		changes.push(getHistoryRuleListLabel('Changed', changed));
+	}
+	for (const group of groupChanges) {
+		const oldGroup = previous.groups.get(group.id);
+		const oldCombiner = (oldGroup.combiner || 'AND').toUpperCase();
+		const newCombiner = (group.combiner || 'AND').toUpperCase();
+		changes.push(`Changed filter logic: ${oldCombiner} → ${newCombiner}`);
+	}
+	return changes.join('; ') || 'Restructured filters';
+}
+
 function getHistoryLabel(previous, next) {
-	if (JSON.stringify(previous.ruleTree) !== JSON.stringify(next.ruleTree)) return 'Updated filter';
+	if (JSON.stringify(previous.ruleTree) !== JSON.stringify(next.ruleTree)) {
+		return getHistoryFilterLabel(previous.ruleTree, next.ruleTree);
+	}
 	if (previous.searchMode !== next.searchMode) return 'Changed search mode';
 	if (previous.user !== next.user) return 'Changed target account';
 	if (previous.orderByField !== next.orderByField || previous.orderByDirection !== next.orderByDirection) return 'Changed sort order';
 	if (previous.limit !== next.limit) return 'Changed display limit';
 	if (previous.includeVideos !== next.includeVideos || previous.includeArchived !== next.includeArchived) return 'Changed media options';
 	return 'Updated profile';
+}
+
+function getProfileHistoryEntryLabel(history, index) {
+	const entry = history[index];
+	const previous = history[index - 1];
+	if (previous && previous.snapshot && entry.snapshot) {
+		return getHistoryLabel(previous.snapshot, entry.snapshot);
+	}
+	return entry.label || 'Updated profile';
 }
 
 function setProfileHistoryStatus(message, failed = false) {
@@ -1733,10 +1881,13 @@ function renderProfileHistory() {
 		const button = document.createElement('button');
 		const label = document.createElement('span');
 		const time = document.createElement('time');
+		const historyLabel = getProfileHistoryEntryLabel(profile.history, i);
 		button.type = 'button';
 		button.className = 'profile-history-entry' + (i === historyIndex ? ' active' : '');
 		button.setAttribute('aria-current', i === historyIndex ? 'true' : 'false');
-		label.textContent = entry.label || 'Updated profile';
+		label.className = 'profile-history-label';
+		label.textContent = historyLabel;
+		button.title = historyLabel;
 		const date = new Date(entry.timestamp);
 		time.textContent = Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
 		button.append(label, time);

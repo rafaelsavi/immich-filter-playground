@@ -21,7 +21,7 @@ A modern, standalone visual filter designer and testing playground for the **Imm
   - Quick-switch between custom saved profiles via a dedicated dropdown.
   - Profiles remember rule trees, search modes, target user accounts, sort settings, and video/archive options.
   - Per-profile modification history with undo/redo, persisted alongside profiles.
-  - Changes to a selected profile are saved automatically; use **Save as Copy** to create a separate profile without renaming or replacing the original.
+  - Changes to a selected profile stay as drafts until **Save Changes** is clicked; switching profiles prompts to save, discard, or cancel. Use **Save as Copy** to save edits as a separate profile without replacing the original.
   - Synchronized via backend API (`/api/profiles`) with seamless local browser persistence fallback.
 
 - **⚡ Simultaneous Two-Way JSON Editor**:

@@ -103,7 +103,7 @@
 						<div class="profile-history-header">
 							<div>
 								<h3 id="profile-history-title">Modification History</h3>
-								<span class="panel-subtitle">Changes are saved with the selected profile</span>
+								<span class="panel-subtitle">Changes are drafts until you save the profile</span>
 							</div>
 							<div class="profile-history-actions">
 								<button type="button" class="btn btn-xs btn-secondary" id="btn-undo-profile" disabled title="Undo (Ctrl+Z)">↶ Undo</button>
@@ -330,6 +330,23 @@
 					<button type="submit" class="btn btn-primary" id="btn-confirm-save-profile">Save Profile</button>
 				</div>
 			</form>
+		</div>
+	</dialog>
+
+	<dialog id="unsaved-profile-dialog" closedby="any" aria-labelledby="unsaved-profile-title" aria-describedby="unsaved-profile-message">
+		<div class="dialog-content">
+			<div class="dialog-header">
+				<h3 id="unsaved-profile-title">Unsaved Profile Changes</h3>
+				<button type="button" class="btn-icon" data-unsaved-action="cancel" aria-label="Keep editing">✕</button>
+			</div>
+			<div class="dialog-body">
+				<p id="unsaved-profile-message"></p>
+				<div class="dialog-actions">
+					<button type="button" class="btn btn-ghost text-danger" data-unsaved-action="discard">Discard Changes</button>
+					<button type="button" class="btn btn-secondary" data-unsaved-action="cancel">Keep Editing</button>
+					<button type="button" class="btn btn-primary" data-unsaved-action="save">Save Changes</button>
+				</div>
+			</div>
 		</div>
 	</dialog>
 

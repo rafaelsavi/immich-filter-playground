@@ -43,8 +43,8 @@ let activeSearchController = null;
 let searchSequenceId = 0;
 const PROFILE_HISTORY_LIMIT = 50;
 let profileHistoryApplying = false;
-let profileHistorySaveChain = Promise.resolve();
-const profileHistorySaveTimers = new Map();
+const savedProfileSnapshots = new Map();
+let resolveUnsavedProfilePrompt = null;
 let saveProfileAsCopy = false;
 
 // ==========================================================================
@@ -1641,10 +1641,16 @@ async function loadProfiles() {
 		if (p && p.id) profileMap.set(p.id, p);
 	}
 	for (const p of serverProfiles) {
-		if (p && p.id) profileMap.set(p.id, p);
+		if (!p || !p.id) continue;
+		const localProfile = profileMap.get(p.id);
+		if (!localProfile || !localProfile.pendingSync) profileMap.set(p.id, p);
 	}
 
 	state.profiles = Array.from(profileMap.values());
+	savedProfileSnapshots.clear();
+	for (const profile of state.profiles) {
+		savedProfileSnapshots.set(profile.id, JSON.stringify(profile));
+	}
 	renderProfilesDropdown();
 }
 
@@ -1672,9 +1678,18 @@ function updateProfileActionLabels() {
 	const saveButton = document.getElementById('btn-save-profile');
 	if (!saveButton) return;
 	const hasActiveProfile = !!(state.activeProfileId && state.activeProfileId.startsWith('prof_'));
-	saveButton.innerHTML = hasActiveProfile ? '<span>✏️ Rename</span>' : '<span>💾 Save as Profile</span>';
+	const profile = hasActiveProfile ? state.profiles.find(item => item.id === state.activeProfileId) : null;
+	const hasUnsavedChanges = hasActiveProfile && isProfileDirty(state.activeProfileId);
+	const needsServerSync = hasActiveProfile && !!(profile && profile.pendingSync);
+	saveButton.innerHTML = hasActiveProfile
+		? (hasUnsavedChanges
+			? '<span>💾 Save Changes</span>'
+			: (needsServerSync ? '<span>↥ Sync to Server</span>' : '<span>✏️ Rename</span>'))
+		: '<span>💾 Save as Profile</span>';
 	saveButton.title = hasActiveProfile
-		? 'Rename the selected profile; filter edits are saved automatically'
+		? (hasUnsavedChanges
+			? 'Save the current filter and settings to this profile'
+			: (needsServerSync ? 'Sync this browser-saved profile to the server' : 'Rename the selected profile'))
 		: 'Save the current filter as a new profile';
 }
 
@@ -1954,31 +1969,135 @@ function renderProfileHistory() {
 	}
 }
 
-function persistActiveProfile(profile) {
-	const profileId = profile.id;
-	clearTimeout(profileHistorySaveTimers.get(profileId));
-	profileHistorySaveTimers.set(profileId, setTimeout(() => {
-		profileHistorySaveTimers.delete(profileId);
-		const payload = JSON.stringify(profile);
-		profileHistorySaveChain = profileHistorySaveChain.then(async () => {
-			const response = await fetch('/api/profiles', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: payload
-			});
-			if (!response.ok) {
-				throw new Error(`Profile save failed (${response.status})`);
-			}
-			if (state.activeProfileId === profileId) {
-				setProfileHistoryStatus('Saved to server profile storage.');
-			}
-		}).catch(err => {
-			console.warn('Could not persist profile history:', err);
-			if (state.activeProfileId === profileId) {
-				setProfileHistoryStatus('Server save failed; changes may not survive reload.', true);
-			}
+function isProfileDirty(profileId) {
+	const profile = state.profiles.find(item => item.id === profileId);
+	if (!profile) return false;
+	const savedSnapshot = savedProfileSnapshots.get(profileId);
+	return savedSnapshot === undefined || JSON.stringify(profile) !== savedSnapshot;
+}
+
+function isActiveProfileDirty() {
+	return !!state.activeProfileId && isProfileDirty(state.activeProfileId);
+}
+
+function saveProfilesToLocalStorage(profiles = state.profiles) {
+	try {
+		localStorage.setItem('immich_search_profiles', JSON.stringify(profiles));
+		return true;
+	} catch (err) {
+		console.warn('Could not save profiles to local storage:', err);
+		return false;
+	}
+}
+
+function replaceProfileWithSavedSnapshot(profileId) {
+	const savedSnapshot = savedProfileSnapshots.get(profileId);
+	const profileIndex = state.profiles.findIndex(item => item.id === profileId);
+	if (savedSnapshot === undefined || profileIndex < 0) return false;
+	state.profiles[profileIndex] = JSON.parse(savedSnapshot);
+	return true;
+}
+
+function discardActiveProfileChanges() {
+	const profileId = state.activeProfileId;
+	if (!replaceProfileWithSavedSnapshot(profileId)) {
+		state.profiles = state.profiles.filter(item => item.id !== profileId);
+		savedProfileSnapshots.delete(profileId);
+		state.activeProfileId = '';
+		renderProfilesDropdown();
+		renderProfileHistory();
+		return true;
+	}
+	applyProfile(profileId);
+	return true;
+}
+
+async function saveActiveProfile() {
+	const profile = state.profiles.find(item => item.id === state.activeProfileId);
+	if (!profile) return false;
+
+	const saveButton = document.getElementById('btn-save-profile');
+	if (saveButton) saveButton.disabled = true;
+	setProfileHistoryStatus('Saving profile changes…');
+
+	let savedToServer = false;
+	try {
+		const response = await fetch('/api/profiles', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(profile)
 		});
-	}, 350));
+		if (!response.ok) throw new Error(`Profile save failed (${response.status})`);
+		savedToServer = true;
+	} catch (err) {
+		console.warn('Could not save profile to server:', err);
+	}
+
+	const wasPendingSync = profile.pendingSync;
+	if (savedToServer) delete profile.pendingSync;
+	else profile.pendingSync = true;
+	const savedLocally = saveProfilesToLocalStorage();
+	if (!savedToServer && !savedLocally) {
+		if (wasPendingSync === undefined) delete profile.pendingSync;
+		else profile.pendingSync = wasPendingSync;
+		if (saveButton) saveButton.disabled = false;
+		updateProfileActionLabels();
+		setProfileHistoryStatus('Could not save changes. Check the server or browser storage and try again.', true);
+		return false;
+	}
+
+	savedProfileSnapshots.set(profile.id, JSON.stringify(profile));
+	if (saveButton) saveButton.disabled = false;
+	updateProfileActionLabels();
+	setProfileHistoryStatus(
+		savedToServer ? 'Saved to server profile storage.' : 'Saved in this browser only; server save failed.',
+		!savedToServer
+	);
+	return true;
+}
+
+function promptUnsavedProfileAction() {
+	const dialog = document.getElementById('unsaved-profile-dialog');
+	const message = document.getElementById('unsaved-profile-message');
+	if (!dialog || !message) {
+		setProfileHistoryStatus('Cannot prompt for unsaved profile changes.', true);
+		return Promise.resolve('cancel');
+	}
+
+	const profile = state.profiles.find(item => item.id === state.activeProfileId);
+	message.textContent = `Save changes to "${profile ? profile.name : 'this profile'}" before continuing?`;
+	return new Promise(resolve => {
+		resolveUnsavedProfilePrompt = resolve;
+		dialog.showModal();
+	});
+}
+
+function finishUnsavedProfilePrompt(action) {
+	if (!resolveUnsavedProfilePrompt) return;
+	const resolve = resolveUnsavedProfilePrompt;
+	resolveUnsavedProfilePrompt = null;
+	const dialog = document.getElementById('unsaved-profile-dialog');
+	if (dialog && dialog.open) dialog.close();
+	resolve(action);
+}
+
+async function resolveUnsavedProfileChanges() {
+	if (!isActiveProfileDirty()) return true;
+	const action = await promptUnsavedProfileAction();
+	if (action === 'save') return saveActiveProfile();
+	if (action === 'discard') return discardActiveProfileChanges();
+	return false;
+}
+
+async function handleProfileSelection(profileId) {
+	const previousProfileId = state.activeProfileId;
+	if (profileId === previousProfileId) return;
+	if (!(await resolveUnsavedProfileChanges())) {
+		const selectEl = document.getElementById('profile-select');
+		if (selectEl) selectEl.value = previousProfileId;
+		return;
+	}
+	applyProfile(profileId);
 }
 
 function recordProfileHistory() {
@@ -2028,14 +2147,9 @@ function recordProfileHistory() {
 	profile.historyIndex = profile.history.length - 1;
 	Object.assign(profile, snapshot);
 
-	try {
-		localStorage.setItem('immich_search_profiles', JSON.stringify(state.profiles));
-	} catch (err) {
-		console.warn('Could not update local profile fallback:', err);
-	}
 	renderProfileHistory();
-	setProfileHistoryStatus('Saving profile history…');
-	persistActiveProfile(profile);
+	updateProfileActionLabels();
+	setProfileHistoryStatus('Unsaved changes. Save Changes to keep them.');
 }
 
 function applyProfileSnapshot(snapshot) {
@@ -2077,8 +2191,8 @@ function restoreProfileHistory(index) {
 	profile.historyIndex = index;
 	Object.assign(profile, getProfileSnapshot());
 	renderProfileHistory();
-	setProfileHistoryStatus('Saving profile history…');
-	persistActiveProfile(profile);
+	updateProfileActionLabels();
+	setProfileHistoryStatus(isActiveProfileDirty() ? 'Unsaved changes. Save Changes to keep them.' : 'No unsaved changes.');
 }
 
 function undoProfileHistory() {
@@ -2108,6 +2222,7 @@ function applyProfile(profileId) {
 
 	if (!profileId) {
 		renderProfileHistory();
+		updateProfileActionLabels();
 		return;
 	}
 
@@ -2149,9 +2264,11 @@ function applyProfile(profileId) {
 			profileHistoryApplying = false;
 		}
 
-		if (!Array.isArray(prof.history) || prof.history.length === 0) {
+		const initializedHistory = !Array.isArray(prof.history) || prof.history.length === 0;
+		if (initializedHistory) {
 			prof.history = [{
 				label: 'Profile saved',
+				detail: '',
 				timestamp: prof.updatedAt || new Date().toISOString(),
 				snapshot: getProfileSnapshot()
 			}];
@@ -2159,8 +2276,12 @@ function applyProfile(profileId) {
 		} else {
 			prof.historyIndex = Math.max(0, Math.min(prof.historyIndex || 0, prof.history.length - 1));
 		}
+		savedProfileSnapshots.set(prof.id, JSON.stringify(prof));
 		renderProfileHistory();
-		setProfileHistoryStatus('History is saved with the profile after each change.');
+		updateProfileActionLabels();
+		setProfileHistoryStatus(prof.pendingSync
+			? 'This profile is saved in this browser only. Use Sync to Server when available.'
+			: 'Changes are drafts until you save this profile.');
 	}
 }
 
@@ -2205,12 +2326,14 @@ async function handleSaveProfileSubmit(e) {
 	e.preventDefault();
 	const nameInput = document.getElementById('save-profile-name');
 	const dialog = document.getElementById('save-profile-dialog');
+	const confirmButton = document.getElementById('btn-confirm-save-profile');
 	const name = nameInput ? nameInput.value.trim() : '';
 	if (!name) return;
 
 	const filterEditor = document.getElementById('filter-json-editor');
 	const rawFilterJson = filterEditor ? filterEditor.value : '{}';
-
+	const snapshot = getProfileSnapshot();
+	const sourceProfileId = saveProfileAsCopy ? state.activeProfileId : '';
 	const id = !saveProfileAsCopy && state.activeProfileId && state.activeProfileId.startsWith('prof_')
 		? state.activeProfileId
 		: '';
@@ -2222,7 +2345,7 @@ async function handleSaveProfileSubmit(e) {
 		id: id,
 		name: name,
 		filterJson: rawFilterJson,
-		ruleTree: state.ruleTree,
+		ruleTree: snapshot.ruleTree,
 		searchMode: state.searchMode,
 		user: state.selectedUser,
 		limit: state.sampleSize,
@@ -2230,19 +2353,17 @@ async function handleSaveProfileSubmit(e) {
 		orderByDirection: state.orderByDirection,
 		includeVideos: state.includeVideos,
 		includeArchived: state.includeArchived,
+		updatedAt: new Date().toISOString(),
 		history: (existingProfile || {}).history || [{
 			label: copiedFrom ? `Copied from ${copiedFrom}` : 'Profile saved',
+			detail: '',
 			timestamp: new Date().toISOString(),
-			snapshot: getProfileSnapshot()
+			snapshot
 		}],
 		historyIndex: (existingProfile || {}).historyIndex || 0
 	};
 
-	if (id && profileHistorySaveTimers.has(id)) {
-		clearTimeout(profileHistorySaveTimers.get(id));
-		profileHistorySaveTimers.delete(id);
-	}
-	await profileHistorySaveChain;
+	if (confirmButton) confirmButton.disabled = true;
 	let savedToServer = false;
 	try {
 		const resp = await fetch('/api/profiles', {
@@ -2252,70 +2373,115 @@ async function handleSaveProfileSubmit(e) {
 		});
 		if (!resp.ok) throw new Error(`Profile save failed (${resp.status})`);
 		const data = await resp.json();
-		if (data.profile) {
-			profileData.id = data.profile.id;
-		}
+		if (!data.profile || !data.profile.id) throw new Error('Profile save response did not include an ID');
+		profileData.id = data.profile.id;
+		profileData.updatedAt = data.profile.updatedAt || profileData.updatedAt;
 		savedToServer = true;
 	} catch (err) {
-		console.warn('Saving profile to server failed, using local storage:', err);
+		console.warn('Saving profile to server failed:', err);
 		if (!profileData.id) {
 			profileData.id = 'prof_' + Date.now();
 		}
 	}
+	if (savedToServer) delete profileData.pendingSync;
+	else profileData.pendingSync = true;
 
-	const idx = state.profiles.findIndex(p => p.id === profileData.id);
-	if (idx >= 0) {
-		state.profiles[idx] = profileData;
-	} else {
-		state.profiles.push(profileData);
+	const nextProfiles = [...state.profiles];
+	if (sourceProfileId && isProfileDirty(sourceProfileId)) {
+		const sourceSnapshot = savedProfileSnapshots.get(sourceProfileId);
+		const sourceIndex = nextProfiles.findIndex(p => p.id === sourceProfileId);
+		if (sourceIndex >= 0) {
+			if (sourceSnapshot === undefined) nextProfiles.splice(sourceIndex, 1);
+			else nextProfiles[sourceIndex] = JSON.parse(sourceSnapshot);
+		}
 	}
 
-	try {
-		localStorage.setItem('immich_search_profiles', JSON.stringify(state.profiles));
-	} catch (e) {}
+	const idx = nextProfiles.findIndex(p => p.id === profileData.id);
+	if (idx >= 0) {
+		nextProfiles[idx] = profileData;
+	} else {
+		nextProfiles.push(profileData);
+	}
 
+	const savedLocally = saveProfilesToLocalStorage(nextProfiles);
+	if (!savedToServer && !savedLocally) {
+		if (confirmButton) confirmButton.disabled = false;
+		setProfileHistoryStatus('Could not save the profile. Check the server or browser storage and try again.', true);
+		return;
+	}
+
+	state.profiles = nextProfiles;
+	savedProfileSnapshots.set(profileData.id, JSON.stringify(profileData));
 	state.activeProfileId = profileData.id;
 	saveProfileAsCopy = false;
 	if (dialog) dialog.close();
 	renderProfilesDropdown();
 	renderProfileHistory();
-	setProfileHistoryStatus(savedToServer ? 'Saved to server profile storage.' : 'Server save failed; profile is only in this browser.', !savedToServer);
+	setProfileHistoryStatus(
+		savedToServer ? 'Saved to server profile storage.' : 'Saved in this browser only; server save failed.',
+		!savedToServer
+	);
 }
 
 async function handleDeleteProfile() {
 	if (!state.activeProfileId || !state.activeProfileId.startsWith('prof_')) return;
-	const prof = state.profiles.find(p => p.id === state.activeProfileId);
+	const idToDelete = state.activeProfileId;
+	const prof = state.profiles.find(p => p.id === idToDelete);
 	const name = prof ? prof.name : 'this profile';
+	if (isProfileDirty(idToDelete) && !(await resolveUnsavedProfileChanges())) return;
+	if (!state.profiles.some(p => p.id === idToDelete)) return;
 	if (!confirm(`Are you sure you want to delete profile "${name}"?`)) {
 		return;
 	}
 
-	const idToDelete = state.activeProfileId;
-	if (profileHistorySaveTimers.has(idToDelete)) {
-		clearTimeout(profileHistorySaveTimers.get(idToDelete));
-		profileHistorySaveTimers.delete(idToDelete);
-	}
-	await profileHistorySaveChain;
 	try {
-		await fetch(`/api/profiles/${encodeURIComponent(idToDelete)}`, {
+		const response = await fetch(`/api/profiles/${encodeURIComponent(idToDelete)}`, {
 			method: 'DELETE'
 		});
+		if (!response.ok) throw new Error(`Profile deletion failed (${response.status})`);
 	} catch (err) {
-		console.warn('Delete profile from server error:', err);
+		console.warn('Could not delete profile from server:', err);
+		setProfileHistoryStatus('Could not delete the profile from server storage.', true);
+		return;
 	}
 
 	state.profiles = state.profiles.filter(p => p.id !== idToDelete);
-	try {
-		localStorage.setItem('immich_search_profiles', JSON.stringify(state.profiles));
-	} catch (e) {}
-
+	savedProfileSnapshots.delete(idToDelete);
+	const savedLocally = saveProfilesToLocalStorage();
 	state.activeProfileId = '';
 	renderProfilesDropdown();
+	renderProfileHistory();
+	setProfileHistoryStatus(savedLocally ? 'Profile deleted.' : 'Profile deleted from server; browser storage could not be updated.', !savedLocally);
+}
+
+function hasPendingProfileSave() {
+	const dialog = document.getElementById('save-profile-dialog');
+	if (!dialog || !dialog.open) return false;
+	if (saveProfileAsCopy) return true;
+
+	const nameInput = document.getElementById('save-profile-name');
+	const name = nameInput ? nameInput.value.trim() : '';
+	if (!name) return false;
+	const profile = state.profiles.find(item => item.id === state.activeProfileId);
+	return !profile || profile.name !== name;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
 	setupDialogLightDismissFallback();
 	bootstrapApp();
+	window.addEventListener('beforeunload', event => {
+		if (!isActiveProfileDirty() && !hasPendingProfileSave()) return;
+		event.preventDefault();
+		event.returnValue = '';
+	});
+
+	const unsavedProfileDialog = document.getElementById('unsaved-profile-dialog');
+	if (unsavedProfileDialog) {
+		unsavedProfileDialog.querySelectorAll('[data-unsaved-action]').forEach(button => {
+			button.addEventListener('click', () => finishUnsavedProfilePrompt(button.dataset.unsavedAction));
+		});
+		unsavedProfileDialog.addEventListener('close', () => finishUnsavedProfilePrompt('cancel'));
+	}
 
 	document.addEventListener('keydown', (event) => {
 		if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
@@ -2409,12 +2575,16 @@ document.addEventListener('DOMContentLoaded', () => {
 	// Search Profiles
 	const profileSelect = document.getElementById('profile-select');
 	if (profileSelect) {
-		profileSelect.addEventListener('change', (e) => applyProfile(e.target.value));
+		profileSelect.addEventListener('change', (e) => handleProfileSelection(e.target.value));
 	}
 
 	const saveProfileBtn = document.getElementById('btn-save-profile');
 	if (saveProfileBtn) {
-		saveProfileBtn.addEventListener('click', () => openSaveProfileModal());
+		saveProfileBtn.addEventListener('click', () => {
+			const profile = state.profiles.find(item => item.id === state.activeProfileId);
+			if (isActiveProfileDirty() || (profile && profile.pendingSync)) saveActiveProfile();
+			else openSaveProfileModal();
+		});
 	}
 
 	const copyProfileBtn = document.getElementById('btn-copy-profile');

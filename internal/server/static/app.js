@@ -673,6 +673,20 @@ function compileRuleToBranch(rule) {
 	return Object.keys(branch).length > 0 ? branch : null;
 }
 
+function mergeFilterBranches(left, right) {
+	const merged = { ...left };
+	for (const [key, value] of Object.entries(right)) {
+		const existing = merged[key];
+		if (existing && value && typeof existing === 'object' && typeof value === 'object' &&
+			!Array.isArray(existing) && !Array.isArray(value)) {
+			merged[key] = { ...existing, ...value };
+		} else {
+			merged[key] = value;
+		}
+	}
+	return merged;
+}
+
 function compileOrGroupToBranches(group) {
 	if (!group || !group.children) return [];
 	const branches = [];
@@ -690,7 +704,7 @@ function compileOrGroupToBranches(group) {
 					const direct = Object.assign({}, andRes);
 					delete direct.or;
 					for (const orBranch of andRes.or) {
-						const merged = Object.assign({}, direct, orBranch);
+						const merged = mergeFilterBranches(direct, orBranch);
 						if (Object.keys(merged).length > 0) branches.push(merged);
 					}
 				} else if (Object.keys(andRes).length > 0) {
@@ -704,13 +718,13 @@ function compileOrGroupToBranches(group) {
 
 function compileAndGroup(group) {
 	if (!group || !group.children) return {};
-	const root = {};
+	let root = {};
 	let orBranches = [];
 
 	for (const child of group.children) {
 		if (child.type === 'rule') {
 			const b = compileRuleToBranch(child);
-			if (b && Object.keys(b).length > 0) Object.assign(root, b);
+			if (b && Object.keys(b).length > 0) root = mergeFilterBranches(root, b);
 		} else if (child.type === 'group') {
 			const childCombiner = (child.combiner || 'AND').toUpperCase();
 			if (childCombiner === 'OR') {
@@ -722,7 +736,7 @@ function compileAndGroup(group) {
 						const combined = [];
 						for (const b1 of orBranches) {
 							for (const b2 of subBranches) {
-								combined.push(Object.assign({}, b1, b2));
+								combined.push(mergeFilterBranches(b1, b2));
 							}
 						}
 						orBranches = combined;
@@ -737,7 +751,7 @@ function compileAndGroup(group) {
 						const combined = [];
 						for (const b1 of orBranches) {
 							for (const b2 of subAnd.or) {
-								combined.push(Object.assign({}, b1, b2));
+								combined.push(mergeFilterBranches(b1, b2));
 							}
 						}
 						orBranches = combined;
@@ -745,7 +759,7 @@ function compileAndGroup(group) {
 					delete subAnd.or;
 				}
 				if (Object.keys(subAnd).length > 0) {
-					Object.assign(root, subAnd);
+					root = mergeFilterBranches(root, subAnd);
 				}
 			}
 		}

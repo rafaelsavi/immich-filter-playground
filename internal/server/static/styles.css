@@ -478,10 +478,14 @@ p, blockquote, li, .pretty-text {
 
 .profile-history-entry {
 	width: 100%;
-	display: flex;
+	display: grid;
+	grid-template-areas:
+		"label time"
+		"detail time";
+	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;
-	justify-content: space-between;
-	gap: 0.75rem;
+	column-gap: 0.75rem;
+	row-gap: 0.1rem;
 	padding: 0.4rem 0.55rem;
 	background: transparent;
 	border: 1px solid transparent;
@@ -501,14 +505,22 @@ p, blockquote, li, .pretty-text {
 }
 
 .profile-history-label {
+	grid-area: label;
 	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	font-weight: 600;
+}
+
+.profile-history-detail {
+	grid-area: detail;
+	min-width: 0;
+	color: var(--text-muted);
+	font-size: 0.68rem;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
 }
 
 .profile-history-entry time {
-	flex-shrink: 0;
+	grid-area: time;
 	color: var(--text-muted);
 	font-size: 0.68rem;
 	white-space: nowrap;

@@ -1712,7 +1712,7 @@ function getHistoryFieldLabel(field) {
 	return definition ? definition.label.replace(/^\S+\s*/, '') : String(field || 'Unknown field').replace(/_/g, ' ');
 }
 
-function getHistoryRuleValue(rule) {
+function getHistoryRuleValue(rule, includeMetadata = false) {
 	if (rule.field === 'date') {
 		if (rule.operator === 'between') {
 			return [rule.dateAfter, rule.dateBefore].filter(Boolean).join(' to ');
@@ -1723,6 +1723,7 @@ function getHistoryRuleValue(rule) {
 		if (!rule.value.length) return '';
 		const definition = FIELD_DEFINITIONS.find(item => item.value === rule.field);
 		const isIDList = definition && definition.type === 'multi-id';
+		if (isIDList && !includeMetadata) return `${rule.value.length} selected`;
 		const options = isIDList ? getFieldOptionsList(rule.field) : [];
 		const values = rule.value.map(value => {
 			if (!isIDList) return String(value);
@@ -1745,57 +1746,52 @@ function getHistoryRuleValue(rule) {
 	return rule.value === null || rule.value === undefined ? '' : String(rule.value);
 }
 
-function getHistoryRuleOperator(rule) {
+function getHistoryRuleCondition(rule, includeMetadata = false) {
+	const value = getHistoryRuleValue(rule, includeMetadata);
+	const isSelfDescribing = ['favorite', 'has_people', 'has_albums', 'has_tags', 'media_type', 'visibility'].includes(rule.field);
+	if (!value && !isSelfDescribing) return '';
 	if (rule.field === 'people') {
-		return { all: 'contains all of', any: 'contains any of', none: 'contains none of' }[rule.operator] || '';
+		const operator = { all: 'includes all of', any: 'includes any of', none: 'includes none of' }[rule.operator];
+		return [operator, value].filter(Boolean).join(' ');
 	}
 	if (['albums', 'tags'].includes(rule.field)) {
-		return { any: 'is in any of', all: 'is in all of', none: 'is in none of' }[rule.operator] || '';
-	}
-	if (['country', 'state', 'city', 'camera', 'make', 'lens'].includes(rule.field)) {
-		return { in: 'is one of', notIn: 'is not one of', eq: 'equals' }[rule.operator] || '';
+		const operator = { any: 'is in any of', all: 'is in all of', none: 'is in none of' }[rule.operator];
+		return [operator, value].filter(Boolean).join(' ');
 	}
 	if (['favorite', 'has_people', 'has_albums', 'has_tags'].includes(rule.field)) {
 		return rule.operator === 'false' || rule.value === false ? 'is false' : 'is true';
 	}
 	if (rule.field === 'media_type') {
-		return { IMAGE: 'is photos only', VIDEO: 'is videos only', MOTION: 'is motion / live photos' }[rule.operator] || '';
+		return { IMAGE: 'Photos only', VIDEO: 'Videos only', MOTION: 'Motion / Live Photos' }[rule.operator] || '';
 	}
 	if (rule.field === 'visibility') {
-		return { timeline: 'is in the timeline', archive: 'is archived', hidden: 'is hidden', locked: 'is locked' }[rule.operator] || '';
+		return { timeline: 'In timeline', archive: 'Archived', hidden: 'Hidden', locked: 'Locked' }[rule.operator] || '';
 	}
 	const operators = {
-		gte: 'is at least', eq: 'equals', lte: 'is at most',
+		in: 'is one of', notIn: 'is not one of', eq: 'equals',
+		gte: 'is at least', lte: 'is at most',
 		after: 'is on or after', before: 'is on or before', between: 'is between',
+		all: 'contains all of', any: 'contains any of', none: 'contains none of',
 		like: 'contains', notLike: 'does not contain', startsWith: 'starts with',
 		endsWith: 'ends with', matches: 'matches'
 	};
-	return operators[rule.operator] || rule.operator || '';
+	const operator = operators[rule.operator] || rule.operator || '';
+	return [operator, value].filter(Boolean).join(' ');
 }
 
-function describeHistoryRule(rule) {
+function describeHistoryRule(rule, includeMetadata = false) {
 	const field = getHistoryFieldLabel(rule.field);
-	const operator = getHistoryRuleOperator(rule);
-	const value = getHistoryRuleValue(rule);
-	const isSelfDescribing = ['favorite', 'has_people', 'has_albums', 'has_tags', 'media_type', 'visibility'].includes(rule.field);
-	if (!value && !isSelfDescribing) return `${field} filter`;
-	return `${field} ${operator}${value ? ` ${value}` : ''}`.trim();
+	const condition = getHistoryRuleCondition(rule, includeMetadata);
+	return `${field}: ${condition || field}`;
 }
 
-function getHistoryRuleListLabel(action, rules) {
-	if (rules.length === 1) {
-		const rule = rules[0];
-		const description = describeHistoryRule(rule);
-		return description === `${getHistoryFieldLabel(rule.field)} filter`
-			? `${action} ${getHistoryFieldLabel(rule.field)} filter`
-			: `${action} filter: ${description}`;
-	}
-	const names = rules.slice(0, 3).map(rule => getHistoryFieldLabel(rule.field));
-	if (rules.length > names.length) names.push(`+${rules.length - names.length} more`);
-	return `${action} ${rules.length} filters: ${names.join(', ')}`;
+function summarizeHistoryRules(rules, includeMetadata = false) {
+	const summaries = rules.slice(0, 3).map(rule => describeHistoryRule(rule, includeMetadata));
+	if (rules.length > summaries.length) summaries.push(`+${rules.length - summaries.length} more`);
+	return summaries.join('; ');
 }
 
-function getHistoryFilterLabel(previousTree, nextTree) {
+function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false) {
 	const previous = getHistoryTreeNodes(previousTree);
 	const next = getHistoryTreeNodes(nextTree);
 	const added = [...next.rules.values()].filter(rule => !previous.rules.has(rule.id));
@@ -1811,43 +1807,100 @@ function getHistoryFilterLabel(previousTree, nextTree) {
 		const oldGroup = previous.groups.get(group.id);
 		return oldGroup && (oldGroup.combiner || 'AND') !== (group.combiner || 'AND');
 	});
-	const changes = [];
-	if (added.length) changes.push(getHistoryRuleListLabel('Added', added));
-	if (removed.length) changes.push(getHistoryRuleListLabel('Removed', removed));
-	if (changed.length === 1) {
+
+	if (added.length === 1 && !removed.length && !changed.length && !groupChanges.length) {
+		const rule = added[0];
+		return {
+			label: `Added ${getHistoryFieldLabel(rule.field)} filter`,
+			detail: getHistoryRuleCondition(rule, includeMetadata)
+		};
+	}
+	if (removed.length === 1 && !added.length && !changed.length && !groupChanges.length) {
+		const rule = removed[0];
+		return {
+			label: `Removed ${getHistoryFieldLabel(rule.field)} filter`,
+			detail: getHistoryRuleCondition(rule, includeMetadata)
+		};
+	}
+	if (changed.length === 1 && !added.length && !removed.length && !groupChanges.length) {
 		const oldRule = previous.rules.get(changed[0].id);
-		changes.push(`Changed filter: ${describeHistoryRule(oldRule)} → ${describeHistoryRule(changed[0])}`);
-	} else if (changed.length > 1) {
-		changes.push(getHistoryRuleListLabel('Changed', changed));
+		const newRule = changed[0];
+		const newField = getHistoryFieldLabel(newRule.field);
+		if (oldRule.field !== newRule.field) {
+			return {
+				label: 'Changed filter field',
+				detail: `${describeHistoryRule(oldRule, includeMetadata)} → ${describeHistoryRule(newRule, includeMetadata)}`
+			};
+		}
+		if (oldRule.operator !== newRule.operator) {
+			return {
+				label: `Changed ${newField} condition`,
+				detail: `${getHistoryRuleCondition(oldRule, includeMetadata)} → ${getHistoryRuleCondition(newRule, includeMetadata)}`
+			};
+		}
+		return {
+			label: `Changed ${newField} values`,
+			detail: `${getHistoryRuleValue(oldRule, includeMetadata) || 'Empty'} → ${getHistoryRuleValue(newRule, includeMetadata) || 'Empty'}`
+		};
 	}
-	for (const group of groupChanges) {
+
+	if (groupChanges.length === 1 && !added.length && !removed.length && !changed.length) {
+		const group = groupChanges[0];
 		const oldGroup = previous.groups.get(group.id);
-		const oldCombiner = (oldGroup.combiner || 'AND').toUpperCase();
-		const newCombiner = (group.combiner || 'AND').toUpperCase();
-		changes.push(`Changed filter logic: ${oldCombiner} → ${newCombiner}`);
+		return {
+			label: 'Changed filter logic',
+			detail: `${(oldGroup.combiner || 'AND').toUpperCase()} → ${(group.combiner || 'AND').toUpperCase()}`
+		};
 	}
-	return changes.join('; ') || 'Restructured filters';
+
+	const details = [];
+	if (added.length) details.push(`Added: ${summarizeHistoryRules(added)}`);
+	if (removed.length) details.push(`Removed: ${summarizeHistoryRules(removed)}`);
+	if (changed.length) details.push(`Changed: ${summarizeHistoryRules(changed)}`);
+	if (groupChanges.length) details.push(`${groupChanges.length} group logic change${groupChanges.length === 1 ? '' : 's'}`);
+	return {
+		label: 'Updated filters',
+		detail: details.join('; ') || 'Filter structure changed'
+	};
 }
 
-function getHistoryLabel(previous, next) {
+function getHistoryDescription(previous, next, includeMetadata = false) {
 	if (JSON.stringify(previous.ruleTree) !== JSON.stringify(next.ruleTree)) {
-		return getHistoryFilterLabel(previous.ruleTree, next.ruleTree);
+		return getHistoryFilterChange(previous.ruleTree, next.ruleTree, includeMetadata);
 	}
-	if (previous.searchMode !== next.searchMode) return 'Changed search mode';
-	if (previous.user !== next.user) return 'Changed target account';
-	if (previous.orderByField !== next.orderByField || previous.orderByDirection !== next.orderByDirection) return 'Changed sort order';
-	if (previous.limit !== next.limit) return 'Changed display limit';
-	if (previous.includeVideos !== next.includeVideos || previous.includeArchived !== next.includeArchived) return 'Changed media options';
-	return 'Updated profile';
+	if (previous.searchMode !== next.searchMode) {
+		const modes = { random: 'Random sample', metadata: 'Sorted timeline' };
+		return { label: 'Changed search mode', detail: `${modes[previous.searchMode] || previous.searchMode} → ${modes[next.searchMode] || next.searchMode}` };
+	}
+	if (previous.user !== next.user) {
+		return { label: 'Changed target account', detail: `${previous.user || 'All accounts'} → ${next.user || 'All accounts'}` };
+	}
+	if (previous.orderByField !== next.orderByField || previous.orderByDirection !== next.orderByDirection) {
+		return { label: 'Changed sort order', detail: `${previous.orderByField} (${previous.orderByDirection}) → ${next.orderByField} (${next.orderByDirection})` };
+	}
+	if (previous.limit !== next.limit) {
+		return { label: 'Changed display limit', detail: `${previous.limit} → ${next.limit} assets` };
+	}
+	if (previous.includeVideos !== next.includeVideos || previous.includeArchived !== next.includeArchived) {
+		const options = snapshot => [
+			snapshot.includeVideos ? 'Videos included' : 'Videos excluded',
+			snapshot.includeArchived ? 'Archived included' : 'Archived excluded'
+		].join(', ');
+		return { label: 'Changed media options', detail: `${options(previous)} → ${options(next)}` };
+	}
+	return { label: 'Updated profile', detail: '' };
 }
 
-function getProfileHistoryEntryLabel(history, index) {
+function getProfileHistoryEntryDescription(history, index) {
 	const entry = history[index];
 	const previous = history[index - 1];
-	if (previous && previous.snapshot && entry.snapshot) {
-		return getHistoryLabel(previous.snapshot, entry.snapshot);
+	if (entry.detail !== undefined) {
+		return { label: entry.label || 'Updated profile', detail: entry.detail };
 	}
-	return entry.label || 'Updated profile';
+	if (previous && previous.snapshot && entry.snapshot) {
+		return getHistoryDescription(previous.snapshot, entry.snapshot);
+	}
+	return { label: entry.label || 'Updated profile', detail: '' };
 }
 
 function setProfileHistoryStatus(message, failed = false) {
@@ -1880,17 +1933,21 @@ function renderProfileHistory() {
 		const item = document.createElement('li');
 		const button = document.createElement('button');
 		const label = document.createElement('span');
+		const detail = document.createElement('span');
 		const time = document.createElement('time');
-		const historyLabel = getProfileHistoryEntryLabel(profile.history, i);
+		const description = getProfileHistoryEntryDescription(profile.history, i);
 		button.type = 'button';
 		button.className = 'profile-history-entry' + (i === historyIndex ? ' active' : '');
 		button.setAttribute('aria-current', i === historyIndex ? 'true' : 'false');
 		label.className = 'profile-history-label';
-		label.textContent = historyLabel;
-		button.title = historyLabel;
+		label.textContent = description.label;
+		detail.className = 'profile-history-detail';
+		detail.textContent = description.detail;
+		detail.hidden = !description.detail;
+		button.title = description.detail ? `${description.label}: ${description.detail}` : description.label;
 		const date = new Date(entry.timestamp);
 		time.textContent = Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
-		button.append(label, time);
+		button.append(label, detail, time);
 		button.addEventListener('click', () => restoreProfileHistory(i));
 		item.appendChild(button);
 		list.appendChild(item);
@@ -1935,6 +1992,7 @@ function recordProfileHistory() {
 	if (!Array.isArray(profile.history) || profile.history.length === 0) {
 		profile.history = [{
 			label: 'Profile saved',
+			detail: '',
 			timestamp: new Date().toISOString(),
 			snapshot: getProfileSnapshot()
 		}];
@@ -1948,15 +2006,18 @@ function recordProfileHistory() {
 
 	const wasAtHistoryEnd = historyIndex === profile.history.length - 1;
 	profile.history.splice(historyIndex + 1);
-	const label = getHistoryLabel(previous, snapshot);
+	const description = getHistoryDescription(previous, snapshot, true);
 	const now = new Date();
 	const lastEntry = profile.history[profile.history.length - 1];
-	if (wasAtHistoryEnd && lastEntry && lastEntry.label === label && now.getTime() - new Date(lastEntry.timestamp).getTime() < 750) {
+	if (wasAtHistoryEnd && lastEntry && lastEntry.label === description.label && now.getTime() - new Date(lastEntry.timestamp).getTime() < 750) {
+		lastEntry.label = description.label;
+		lastEntry.detail = description.detail;
 		lastEntry.timestamp = now.toISOString();
 		lastEntry.snapshot = snapshot;
 	} else {
 		profile.history.push({
-			label,
+			label: description.label,
+			detail: description.detail,
 			timestamp: now.toISOString(),
 			snapshot
 		});

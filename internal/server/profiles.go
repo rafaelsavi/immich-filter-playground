@@ -32,6 +32,7 @@ type SearchProfile struct {
 
 type ProfileHistoryEntry struct {
 	Label     string          `json:"label"`
+	Detail    string          `json:"detail,omitempty"`
 	Timestamp time.Time       `json:"timestamp"`
 	Snapshot  json.RawMessage `json:"snapshot"`
 }

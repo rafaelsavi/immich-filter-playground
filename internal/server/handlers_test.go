@@ -129,7 +129,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	}
 
 	// 4b. Save a profile
-	saveBody := `{"name":"Tokyo Favorites","searchMode":"random","filterJson":"{\"country\":{\"in\":[\"Japan\"]}}","history":[{"label":"Profile saved","timestamp":"2026-11-16T16:00:00Z","snapshot":{"searchMode":"random","ruleTree":{"id":"root","type":"group","combiner":"AND","children":[]}}}],"historyIndex":0}`
+	saveBody := `{"name":"Tokyo Favorites","searchMode":"random","filterJson":"{\"country\":{\"in\":[\"Japan\"]}}","history":[{"label":"Profile saved","detail":"Country is one of Japan","timestamp":"2026-11-16T16:00:00Z","snapshot":{"searchMode":"random","ruleTree":{"id":"root","type":"group","combiner":"AND","children":[]}}}],"historyIndex":0}`
 	reqProfSave := httptest.NewRequest(http.MethodPost, "/api/profiles", bytes.NewBufferString(saveBody))
 	recProfSave := httptest.NewRecorder()
 	srv.ServeHTTP(recProfSave, reqProfSave)
@@ -144,6 +144,9 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	}
 	if saveResp.Profile.ID == "" || saveResp.Profile.Name != "Tokyo Favorites" {
 		t.Fatalf("unexpected saved profile: %+v", saveResp.Profile)
+	}
+	if len(saveResp.Profile.History) != 1 || saveResp.Profile.History[0].Detail != "Country is one of Japan" {
+		t.Fatalf("expected history detail to be returned, got %+v", saveResp.Profile.History)
 	}
 
 	// 4c. Verify profile list
@@ -160,6 +163,9 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	}
 	if len(listResp.Profiles[0].History) != 1 || listResp.Profiles[0].HistoryIndex != 0 {
 		t.Fatalf("expected profile history to persist, got %+v", listResp.Profiles[0])
+	}
+	if listResp.Profiles[0].History[0].Detail != "Country is one of Japan" {
+		t.Fatalf("expected history detail to persist, got %+v", listResp.Profiles[0].History[0])
 	}
 	var historySnapshot struct {
 		SearchMode string `json:"searchMode"`

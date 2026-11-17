@@ -37,7 +37,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	cfg.Immich.URL = mockImmich.URL
 	cfg.Immich.APIKey = "test-api-key"
 
-	srv := New(cfg, "test-version")
+	srv := New(cfg, "vtest-version")
 
 	// 1. Test GET /api/bootstrap
 	reqBoot := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
@@ -103,7 +103,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 	if err := json.Unmarshal(recHealth.Body.Bytes(), &healthResp); err != nil {
 		t.Fatalf("unmarshaling health response: %v", err)
 	}
-	if healthResp.Status != "ok" || !healthResp.Configured || healthResp.Version != "test-version" {
+	if healthResp.Status != "ok" || !healthResp.Configured || healthResp.Version != "vtest-version" {
 		t.Errorf("unexpected health response: %+v", healthResp)
 	}
 
@@ -114,6 +114,7 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 		t.Fatalf("expected 200 from /, got %d", recIndex.Code)
 	}
 	if !bytes.Contains(recIndex.Body.Bytes(), []byte("vtest-version")) ||
+		bytes.Contains(recIndex.Body.Bytes(), []byte("vvtest-version")) ||
 		!bytes.Contains(recIndex.Body.Bytes(), []byte("https://github.com/rafaelsavi/immich-filter-playground")) ||
 		bytes.Contains(recIndex.Body.Bytes(), []byte("{{APP_VERSION}}")) {
 		t.Errorf("application page did not render version and repository link")

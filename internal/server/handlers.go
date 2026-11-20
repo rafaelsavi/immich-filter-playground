@@ -11,8 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
 	"immich-filter-playground/internal/immich"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type metadataOption struct {
@@ -498,7 +499,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		})
 
 		countG.Go(func() error {
-			c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 5000, includeVideos, includeArchived)
+			c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 1000000, includeVideos, includeArchived)
 			countMu.Lock()
 			defer countMu.Unlock()
 			if err != nil {

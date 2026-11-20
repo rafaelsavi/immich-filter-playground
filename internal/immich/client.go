@@ -429,7 +429,7 @@ type cachedAssetCount struct {
 // CountAssets counts matching assets using cursor pagination on /api/search/metadata up to maxCount.
 func (c *Client) CountAssets(ctx context.Context, apiKey string, filter SearchFilter, maxCount int, includeVideos, includeArchived bool) (int, bool, error) {
 	if maxCount <= 0 {
-		maxCount = 5000
+		maxCount = 1000000
 	}
 	effectiveFilter := ApplyDefaultConstraints(filter, includeVideos, includeArchived)
 

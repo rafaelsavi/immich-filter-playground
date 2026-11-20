@@ -41,7 +41,7 @@ func TestCountAssetsPaginationAndCaching(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Multi-page count with pages < 1000
-	total, exact, err := client.CountAssets(ctx, "k1", SearchFilter{}, 5000, true, false)
+	total, exact, err := client.CountAssets(ctx, "k1", SearchFilter{}, 1000000, true, false)
 	if err != nil {
 		t.Fatalf("CountAssets returned error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCountAssetsPaginationAndCaching(t *testing.T) {
 	}
 
 	// 2. Cache hit: same query should not make additional HTTP requests
-	totalCached, exactCached, err := client.CountAssets(ctx, "k1", SearchFilter{}, 5000, true, false)
+	totalCached, exactCached, err := client.CountAssets(ctx, "k1", SearchFilter{}, 1000000, true, false)
 	if err != nil || totalCached != 625 || !exactCached {
 		t.Fatalf("expected cached total=625 exact=true, got total=%d exact=%v err=%v", totalCached, exactCached, err)
 	}

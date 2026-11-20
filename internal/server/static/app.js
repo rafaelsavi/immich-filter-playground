@@ -30,6 +30,13 @@ const state = {
 	},
 	lastAssets: [],
 	lastRequestBodyJson: '{}',
+	lightboxIndex: -1,
+	defaults: {
+		sampleSize: 24,
+		searchMode: 'random',
+		includeVideos: true,
+		includeArchived: false
+	},
 	ruleTree: {
 		id: 'root',
 		type: 'group',
@@ -46,6 +53,7 @@ let profileHistoryApplying = false;
 const savedProfileSnapshots = new Map();
 let resolveUnsavedProfilePrompt = null;
 let saveProfileAsCopy = false;
+const customHistory = { entries: [], index: -1 };
 
 // ==========================================================================
 // Utilities
@@ -311,13 +319,79 @@ window.rtRemoveMultiValue = function(ruleId, val, e) {
 	syncFromRuleTree();
 };
 
+window.rtDuplicateRule = function(ruleId) {
+	const info = findGroupAndIndex(state.ruleTree, ruleId);
+	if (!info || info.node.type !== 'rule') return;
+	const clone = JSON.parse(JSON.stringify(info.node));
+	clone.id = generateNodeId('r');
+	info.parent.children.splice(info.index + 1, 0, clone);
+	renderRuleTree();
+	syncFromRuleTree();
+};
+
+function isMultiIdField(field) {
+	return ['people', 'albums', 'tags'].includes(field);
+}
+
 window.rtHandleChipKeydown = function(ruleId, e) {
+	const dd = document.getElementById('dropdown_' + ruleId);
+	const visibleItems = dd ? Array.from(dd.querySelectorAll('.rt-dropdown-item')).filter(el => el.style.display !== 'none') : [];
+
+	if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+		e.preventDefault();
+		if (dd && !dd.classList.contains('open')) dd.classList.add('open');
+		if (visibleItems.length === 0) return;
+		const curIdx = visibleItems.findIndex(el => el.classList.contains('highlighted'));
+		visibleItems.forEach(el => el.classList.remove('highlighted'));
+		let nextIdx = e.key === 'ArrowDown' ? curIdx + 1 : curIdx - 1;
+		if (nextIdx < 0) nextIdx = visibleItems.length - 1;
+		if (nextIdx >= visibleItems.length) nextIdx = 0;
+		const nextEl = visibleItems[nextIdx];
+		nextEl.classList.add('highlighted');
+		nextEl.scrollIntoView({ block: 'nearest' });
+		return;
+	}
+
+	if (e.key === 'Escape') {
+		if (dd) {
+			dd.classList.remove('open');
+			dd.querySelectorAll('.rt-dropdown-item.highlighted').forEach(el => el.classList.remove('highlighted'));
+		}
+		return;
+	}
+
+	if (e.key === 'Backspace' && e.target.value === '') {
+		const rule = findNode(state.ruleTree, ruleId);
+		if (rule && Array.isArray(rule.value) && rule.value.length > 0) {
+			e.preventDefault();
+			rule.value.pop();
+			renderRuleTree();
+			syncFromRuleTree();
+			const reopened = document.getElementById('dropdown_' + ruleId);
+			if (reopened) reopened.classList.add('open');
+			const input = reopened ? reopened.parentElement.querySelector('.rt-chip-input') : null;
+			if (input) input.focus();
+		}
+		return;
+	}
+
 	if (e.key === 'Enter') {
 		e.preventDefault();
-		const val = (e.target.value || '').trim();
-		if (!val) return;
 		const rule = findNode(state.ruleTree, ruleId);
 		if (!rule) return;
+		const highlighted = visibleItems.find(el => el.classList.contains('highlighted'));
+		if (highlighted) {
+			rtToggleMultiValue(ruleId, highlighted.dataset.value, e);
+			return;
+		}
+		if (isMultiIdField(rule.field)) {
+			if (visibleItems.length > 0) {
+				rtToggleMultiValue(ruleId, visibleItems[0].dataset.value, e);
+			}
+			return;
+		}
+		const val = (e.target.value || '').trim();
+		if (!val) return;
 		if (!Array.isArray(rule.value)) rule.value = [];
 		if (!rule.value.includes(val)) {
 			rule.value.push(val);
@@ -356,20 +430,25 @@ window.rtFilterDropdown = function(ruleId, query) {
 	const q = (query || '').toLowerCase().trim();
 	let visibleCount = 0;
 	dd.querySelectorAll('.rt-dropdown-item').forEach(item => {
+		item.classList.remove('highlighted');
 		const txt = item.textContent.toLowerCase();
 		const matches = txt.includes(q);
 		item.style.display = matches ? 'flex' : 'none';
 		if (matches) visibleCount++;
 	});
+	const rule = findNode(state.ruleTree, ruleId);
+	const emptyText = rule && isMultiIdField(rule.field)
+		? 'No matching options found'
+		: 'Press Enter to add custom value';
 	let noMatch = dd.querySelector('.rt-no-match');
 	if (visibleCount === 0) {
 		if (!noMatch) {
 			noMatch = document.createElement('div');
 			noMatch.className = 'rt-no-match';
 			noMatch.style.cssText = 'padding: 0.5rem 0.65rem; color: var(--text-muted); font-size: 0.75rem;';
-			noMatch.textContent = 'Press Enter to add custom value';
 			dd.appendChild(noMatch);
 		}
+		noMatch.textContent = emptyText;
 		noMatch.style.display = 'block';
 	} else if (noMatch) {
 		noMatch.style.display = 'none';
@@ -575,7 +654,8 @@ function renderRuleHTML(rule) {
 			${fieldSelect}
 			${opSelect}
 			${valueBox}
-			<button type="button" class="rt-btn-del" onclick="rtDeleteNode('${rule.id}')" title="Delete condition">✕</button>
+			<button type="button" class="rt-btn-dup" onclick="rtDuplicateRule('${escapeHtml(rule.id)}')" title="Duplicate condition">⧉</button>
+			<button type="button" class="rt-btn-del" onclick="rtDeleteNode('${escapeHtml(rule.id)}')" title="Delete condition">✕</button>
 		</div>
 	`;
 }
@@ -991,6 +1071,7 @@ function updateCodeViewers(ast, skipFilterEditor) {
 
 	// Update URL query string without reloading
 	const url = new URL(window.location.href);
+	const defaults = state.defaults || { sampleSize: 24, searchMode: 'random', includeVideos: true, includeArchived: false };
 	if (jsonStr && jsonStr !== '{}') {
 		url.searchParams.set('filter', JSON.stringify(ast));
 	} else {
@@ -1000,6 +1081,36 @@ function updateCodeViewers(ast, skipFilterEditor) {
 		url.searchParams.set('user', state.selectedUser);
 	} else {
 		url.searchParams.delete('user');
+	}
+	if (state.activeProfileId) {
+		url.searchParams.set('profile', state.activeProfileId);
+	} else {
+		url.searchParams.delete('profile');
+	}
+	if (state.searchMode !== (defaults.searchMode || 'random')) {
+		url.searchParams.set('mode', state.searchMode);
+	} else {
+		url.searchParams.delete('mode');
+	}
+	if (state.searchMode === 'metadata' && (state.orderByField !== 'localDateTime' || state.orderByDirection !== 'desc')) {
+		url.searchParams.set('sort', `${state.orderByField}:${state.orderByDirection}`);
+	} else {
+		url.searchParams.delete('sort');
+	}
+	if (state.sampleSize !== (defaults.sampleSize || 24)) {
+		url.searchParams.set('limit', String(state.sampleSize));
+	} else {
+		url.searchParams.delete('limit');
+	}
+	if (state.includeVideos !== (defaults.includeVideos !== false)) {
+		url.searchParams.set('videos', state.includeVideos ? '1' : '0');
+	} else {
+		url.searchParams.delete('videos');
+	}
+	if (state.includeArchived !== !!defaults.includeArchived) {
+		url.searchParams.set('archived', state.includeArchived ? '1' : '0');
+	} else {
+		url.searchParams.delete('archived');
 	}
 	window.history.replaceState({}, '', url.toString());
 
@@ -1204,25 +1315,108 @@ function renderSearchResults(data) {
 // Asset Lightbox Dialog
 // ==========================================================================
 
+function resolveMetadataIdByName(list, name) {
+	if (!Array.isArray(list) || !name) return '';
+	const target = String(name).trim().toLowerCase();
+	const exact = list.find(item => String(item.label || '').toLowerCase() === target);
+	if (exact) return exact.id;
+	const prefixed = list.find(item => String(item.label || '').toLowerCase().startsWith(target + ' (@'));
+	return prefixed ? prefixed.id : '';
+}
+
+window.addQuickFilterFromAsset = function(field, value) {
+	if (!field || value === undefined || value === null || value === '') return;
+	let op = 'in';
+	let ruleVal = [value];
+	if (field === 'people') {
+		op = 'all';
+		const resolved = resolveMetadataIdByName(state.metadata.people, value);
+		if (!resolved) return;
+		ruleVal = [resolved];
+	} else if (field === 'tags') {
+		op = 'any';
+		const resolved = resolveMetadataIdByName(state.metadata.tags, value);
+		if (!resolved) return;
+		ruleVal = [resolved];
+	}
+
+	if (!state.ruleTree || state.ruleTree.type !== 'group') {
+		state.ruleTree = { id: 'root', type: 'group', combiner: 'AND', children: [] };
+	} else if ((state.ruleTree.combiner || 'AND').toUpperCase() !== 'AND') {
+		state.ruleTree = {
+			id: generateNodeId('g'),
+			type: 'group',
+			combiner: 'AND',
+			children: [state.ruleTree]
+		};
+	}
+
+	state.ruleTree.children.push({
+		id: generateNodeId('r'),
+		type: 'rule',
+		field,
+		operator: op,
+		value: ruleVal
+	});
+
+	const dialog = document.getElementById('asset-dialog');
+	if (dialog && dialog.open) dialog.close();
+	renderRuleTree();
+	syncFromRuleTree();
+};
+
 window.openAssetModal = function(index) {
 	const item = state.lastAssets[index];
 	if (!item) return;
 
+	state.lightboxIndex = index;
 	const dialog = document.getElementById('asset-dialog');
 	const titleEl = document.getElementById('asset-dialog-title');
 	const bodyEl = document.getElementById('asset-dialog-body');
+	const prevBtn = document.getElementById('btn-lightbox-prev');
+	const nextBtn = document.getElementById('btn-lightbox-next');
+	const counterEl = document.getElementById('lightbox-counter');
 	if (!dialog || !bodyEl) return;
 
 	if (titleEl) {
 		titleEl.textContent = item.filename || item.id;
 	}
+	if (counterEl) {
+		counterEl.textContent = `${index + 1} / ${state.lastAssets.length}`;
+	}
+	if (prevBtn) prevBtn.disabled = index <= 0;
+	if (nextBtn) nextBtn.disabled = index >= state.lastAssets.length - 1;
 
 	const mediaHtml = item.type === 'VIDEO'
 		? `<video src="${escapeHtml(item.originalUrl)}" controls autoplay playsinline></video>`
 		: `<img src="${escapeHtml(item.previewUrl)}" alt="${escapeHtml(item.filename)}">`;
 
-	const locParts = [item.city, item.state, item.country].filter(Boolean).join(', ');
-	const camParts = [item.make, item.model, item.lensModel].filter(Boolean).join(' · ');
+	const locButtons = [
+		item.city ? `<button type="button" class="meta-filter-btn" data-quick-field="city" data-quick-value="${escapeHtml(item.city)}" title="Filter by city">📍 ${escapeHtml(item.city)}</button>` : '',
+		item.state ? `<span>${escapeHtml(item.state)}</span>` : '',
+		item.country ? `<button type="button" class="meta-filter-btn" data-quick-field="country" data-quick-value="${escapeHtml(item.country)}" title="Filter by country">🌍 ${escapeHtml(item.country)}</button>` : ''
+	].filter(Boolean).join(' ');
+
+	const peopleButtons = (item.people || []).map(name => {
+		const hasId = !!resolveMetadataIdByName(state.metadata.people, name);
+		return hasId
+			? `<button type="button" class="meta-filter-btn" data-quick-field="people" data-quick-value="${escapeHtml(name)}" title="Filter by ${escapeHtml(name)}">👤 ${escapeHtml(name)}</button>`
+			: `<span class="meta-filter-btn" style="cursor:default;">👤 ${escapeHtml(name)}</span>`;
+	}).join('');
+
+	const tagButtons = (item.tags || []).map(label => {
+		const hasId = !!resolveMetadataIdByName(state.metadata.tags, label);
+		return hasId
+			? `<button type="button" class="meta-filter-btn" data-quick-field="tags" data-quick-value="${escapeHtml(label)}" title="Filter by tag ${escapeHtml(label)}">🏷️ ${escapeHtml(label)}</button>`
+			: `<span class="meta-filter-btn" style="cursor:default;">🏷️ ${escapeHtml(label)}</span>`;
+	}).join('');
+
+	const camParts = [item.make, item.model ? `<button type="button" class="meta-filter-btn" data-quick-field="camera" data-quick-value="${escapeHtml(item.model)}" title="Filter by camera model">📷 ${escapeHtml(item.model)}</button>` : '', item.lensModel].filter(Boolean).join(' · ');
+
+	const statusBadges = [];
+	if (item.isFavorite) statusBadges.push('<span class="badge-pill badge-fav">♥ Favorite</span>');
+	if (item.rating > 0) statusBadges.push(`<span class="badge-pill badge-rating">${'★'.repeat(item.rating)} (${item.rating}/5)</span>`);
+	if (item.isArchived) statusBadges.push('<span class="badge-pill badge-video">Archived</span>');
 
 	bodyEl.innerHTML = `
 		<div class="dialog-media-box">
@@ -1233,6 +1427,11 @@ window.openAssetModal = function(index) {
 				<span class="meta-label">Asset ID</span>
 				<span class="meta-val"><code>${escapeHtml(item.id)}</code></span>
 			</div>
+			${statusBadges.length ? `
+			<div class="meta-row">
+				<span class="meta-label">Status & Rating</span>
+				<span class="meta-val" style="display:flex;gap:0.35rem;flex-wrap:wrap;">${statusBadges.join('')}</span>
+			</div>` : ''}
 			${item.user ? `
 			<div class="meta-row">
 				<span class="meta-label">Account</span>
@@ -1243,25 +1442,30 @@ window.openAssetModal = function(index) {
 				<span class="meta-label">Date Taken</span>
 				<span class="meta-val">${escapeHtml(item.takenAt)}</span>
 			</div>` : ''}
-			${locParts ? `
+			${locButtons ? `
 			<div class="meta-row">
 				<span class="meta-label">Location</span>
-				<span class="meta-val">📍 ${escapeHtml(locParts)}</span>
+				<div class="meta-filter-chips">${locButtons}</div>
 			</div>` : ''}
-			${(item.people && item.people.length) ? `
+			${peopleButtons ? `
 			<div class="meta-row">
 				<span class="meta-label">People</span>
-				<span class="meta-val">👤 ${escapeHtml(item.people.join(', '))}</span>
+				<div class="meta-filter-chips">${peopleButtons}</div>
 			</div>` : ''}
-			${(item.tags && item.tags.length) ? `
+			${tagButtons ? `
 			<div class="meta-row">
 				<span class="meta-label">Tags</span>
-				<span class="meta-val">🏷️ ${escapeHtml(item.tags.join(', '))}</span>
+				<div class="meta-filter-chips">${tagButtons}</div>
 			</div>` : ''}
 			${camParts ? `
 			<div class="meta-row">
 				<span class="meta-label">Camera & Lens</span>
-				<span class="meta-val">📷 ${escapeHtml(camParts)}</span>
+				<div class="meta-val">${camParts}</div>
+			</div>` : ''}
+			${item.description ? `
+			<div class="meta-row">
+				<span class="meta-label">Description</span>
+				<span class="meta-val pretty-text">${escapeHtml(item.description)}</span>
 			</div>` : ''}
 			${(item.width && item.height) ? `
 			<div class="meta-row">
@@ -1275,7 +1479,7 @@ window.openAssetModal = function(index) {
 		</div>
 	`;
 
-	dialog.showModal();
+	if (!dialog.open) dialog.showModal();
 };
 
 function setupDialogLightDismissFallback() {
@@ -1315,6 +1519,12 @@ async function bootstrapApp() {
 	const urlParams = new URLSearchParams(window.location.search);
 	const initialUser = urlParams.get('user') || '';
 	const initialFilter = urlParams.get('filter') || '';
+	const initialProfile = urlParams.get('profile') || '';
+	const initialMode = urlParams.get('mode') || '';
+	const initialSort = urlParams.get('sort') || '';
+	const initialLimit = urlParams.get('limit') || '';
+	const initialVideos = urlParams.get('videos');
+	const initialArchived = urlParams.get('archived');
 
 	try {
 		const resp = await fetch('/api/bootstrap' + (initialUser ? `?user=${encodeURIComponent(initialUser)}` : ''));
@@ -1328,16 +1538,49 @@ async function bootstrapApp() {
 		state.metadata = data.metadata || state.metadata;
 
 		if (data.defaults) {
-			state.sampleSize = data.defaults.sampleSize || 24;
-			state.searchMode = data.defaults.searchMode || 'random';
-			state.includeVideos = data.defaults.includeVideos !== false;
-			state.includeArchived = !!data.defaults.includeArchived;
+			state.defaults = {
+				sampleSize: data.defaults.sampleSize || 24,
+				searchMode: data.defaults.searchMode || 'random',
+				includeVideos: data.defaults.includeVideos !== false,
+				includeArchived: !!data.defaults.includeArchived
+			};
+			state.sampleSize = state.defaults.sampleSize;
+			state.searchMode = state.defaults.searchMode;
+			state.includeVideos = state.defaults.includeVideos;
+			state.includeArchived = state.defaults.includeArchived;
 		}
 
 		updateConnectionBanner(data);
 		populateAccountsSelector();
-		syncToolbarControls();
 		await loadProfiles();
+
+		if (initialProfile && state.profiles.some(p => p.id === initialProfile)) {
+			applyProfile(initialProfile);
+			return;
+		}
+
+		if (initialMode === 'random' || initialMode === 'metadata') {
+			state.searchMode = initialMode;
+		}
+		if (initialSort && initialSort.includes(':')) {
+			const [field, dir] = initialSort.split(':');
+			if (field) state.orderByField = field;
+			if (dir === 'asc' || dir === 'desc') state.orderByDirection = dir;
+		}
+		if (initialLimit) {
+			const parsedLimit = parseInt(initialLimit, 10);
+			if (Number.isFinite(parsedLimit) && parsedLimit > 0 && parsedLimit <= 250) {
+				state.sampleSize = parsedLimit;
+			}
+		}
+		if (initialVideos === '0' || initialVideos === '1') {
+			state.includeVideos = initialVideos === '1';
+		}
+		if (initialArchived === '0' || initialArchived === '1') {
+			state.includeArchived = initialArchived === '1';
+		}
+
+		syncToolbarControls();
 
 		// Initialize Rule Tree from ?filter= or default starter rule
 		if (initialFilter && initialFilter.trim() !== '' && initialFilter.trim() !== '{}') {
@@ -1670,6 +1913,7 @@ function applyJsonEditorToTree() {
 		state.ruleTree = group || { id: 'root', type: 'group', combiner: 'AND', children: [] };
 		renderRuleTree();
 		syncFromRuleTree({ skipFilterEditor: false });
+		setJsonSyncStatus('valid', '✓ Applied to Tree');
 	} catch (err) {
 		setJsonSyncStatus('error', '⚠️ ' + err.message);
 	}
@@ -1761,7 +2005,8 @@ function renderProfilesDropdown() {
 	for (const p of state.profiles) {
 		const opt = document.createElement('option');
 		opt.value = p.id;
-		opt.textContent = `📁 ${p.name}`;
+		const dirtyPrefix = (p.id === state.activeProfileId && isProfileDirty(p.id)) ? '• ' : '';
+		opt.textContent = `${dirtyPrefix}📁 ${p.name}`;
 		selectEl.appendChild(opt);
 	}
 
@@ -1774,11 +2019,26 @@ function renderProfilesDropdown() {
 
 function updateProfileActionLabels() {
 	const saveButton = document.getElementById('btn-save-profile');
-	if (!saveButton) return;
+	const discardButton = document.getElementById('btn-discard-profile');
 	const hasActiveProfile = !!(state.activeProfileId && state.activeProfileId.startsWith('prof_'));
 	const profile = hasActiveProfile ? state.profiles.find(item => item.id === state.activeProfileId) : null;
 	const hasUnsavedChanges = hasActiveProfile && isProfileDirty(state.activeProfileId);
 	const needsServerSync = hasActiveProfile && !!(profile && profile.pendingSync);
+
+	if (discardButton) {
+		discardButton.hidden = !hasUnsavedChanges;
+	}
+
+	const selectEl = document.getElementById('profile-select');
+	if (selectEl && hasActiveProfile && profile) {
+		const activeOpt = Array.from(selectEl.options).find(opt => opt.value === state.activeProfileId);
+		if (activeOpt) {
+			activeOpt.textContent = `${hasUnsavedChanges ? '• ' : ''}📁 ${profile.name}`;
+		}
+	}
+
+	if (!saveButton) return;
+	saveButton.classList.toggle('btn-unsaved', hasUnsavedChanges);
 	saveButton.innerHTML = hasActiveProfile
 		? (hasUnsavedChanges
 			? '<span>💾 Save Changes</span>'
@@ -1786,9 +2046,9 @@ function updateProfileActionLabels() {
 		: '<span>💾 Save as Profile</span>';
 	saveButton.title = hasActiveProfile
 		? (hasUnsavedChanges
-			? 'Save the current filter and settings to this profile'
+			? 'Save the current filter and settings to this profile (Ctrl+S)'
 			: (needsServerSync ? 'Sync this browser-saved profile to the server' : 'Rename the selected profile'))
-		: 'Save the current filter as a new profile';
+		: 'Save the current filter as a new profile (Ctrl+S)';
 }
 
 function getProfileSnapshot() {
@@ -2043,32 +2303,48 @@ function setProfileHistoryStatus(message, failed = false) {
 	status.classList.toggle('error', failed);
 }
 
+function getActiveHistoryContext() {
+	if (state.activeProfileId) {
+		const profile = state.profiles.find(p => p.id === state.activeProfileId);
+		if (profile) {
+			return { isProfile: true, target: profile };
+		}
+	}
+	return { isProfile: false, target: customHistory };
+}
+
 function renderProfileHistory() {
 	const list = document.getElementById('profile-history-list');
 	const undoButton = document.getElementById('btn-undo-profile');
 	const redoButton = document.getElementById('btn-redo-profile');
-	const profile = state.profiles.find(p => p.id === state.activeProfileId);
+	const countBadge = document.getElementById('profile-history-count');
+	const ctx = getActiveHistoryContext();
+	const target = ctx.target;
+	const history = ctx.isProfile ? target.history : target.entries;
+	const rawIndex = ctx.isProfile ? target.historyIndex : target.index;
 	if (!list || !undoButton || !redoButton) return;
 
 	list.replaceChildren();
-	if (!profile || !Array.isArray(profile.history) || profile.history.length === 0) {
+	if (!Array.isArray(history) || history.length === 0) {
 		undoButton.disabled = true;
 		redoButton.disabled = true;
-		setProfileHistoryStatus('Select a saved profile to track changes.');
+		if (countBadge) countBadge.textContent = '0';
+		setProfileHistoryStatus(ctx.isProfile ? 'Select a saved profile to track changes.' : 'Edit filters to track session changes, or select a profile.');
 		return;
 	}
 
-	const historyIndex = Math.max(0, Math.min(profile.historyIndex || 0, profile.history.length - 1));
+	if (countBadge) countBadge.textContent = String(history.length);
+	const historyIndex = Math.max(0, Math.min(rawIndex || 0, history.length - 1));
 	undoButton.disabled = historyIndex <= 0;
-	redoButton.disabled = historyIndex >= profile.history.length - 1;
-	for (let i = profile.history.length - 1; i >= 0; i--) {
-		const entry = profile.history[i];
+	redoButton.disabled = historyIndex >= history.length - 1;
+	for (let i = history.length - 1; i >= 0; i--) {
+		const entry = history[i];
 		const item = document.createElement('li');
 		const button = document.createElement('button');
 		const label = document.createElement('span');
 		const detail = document.createElement('span');
 		const time = document.createElement('time');
-		const description = getProfileHistoryEntryDescription(profile.history, i);
+		const description = getProfileHistoryEntryDescription(history, i);
 		button.type = 'button';
 		button.className = 'profile-history-entry' + (i === historyIndex ? ' active' : '');
 		button.setAttribute('aria-current', i === historyIndex ? 'true' : 'false');
@@ -2231,7 +2507,50 @@ async function handleProfileSelection(profileId) {
 
 function recordProfileHistory() {
 	if (!state.activeProfileId) {
+		const snapshot = getProfileSnapshot();
+		if (customHistory.entries.length === 0) {
+			customHistory.entries.push({
+				label: 'Session started',
+				detail: '',
+				timestamp: new Date().toISOString(),
+				snapshot
+			});
+			customHistory.index = 0;
+			renderProfileHistory();
+			return;
+		}
+		const idx = Math.max(0, Math.min(customHistory.index, customHistory.entries.length - 1));
+		const previous = customHistory.entries[idx].snapshot;
+		if (JSON.stringify(previous) === JSON.stringify(snapshot)) {
+			renderProfileHistory();
+			return;
+		}
+		const wasAtEnd = idx === customHistory.entries.length - 1;
+		customHistory.entries.splice(idx + 1);
+		const description = getHistoryDescription(previous, snapshot, true);
+		const now = new Date();
+		const lastEntry = customHistory.entries[customHistory.entries.length - 1];
+		const baseSnapshot = customHistory.entries.length >= 2 ? customHistory.entries[customHistory.entries.length - 2].snapshot : null;
+		if (wasAtEnd && lastEntry && lastEntry.label === description.label && now.getTime() - new Date(lastEntry.timestamp).getTime() < 750) {
+			const coalescedDesc = baseSnapshot ? getHistoryDescription(baseSnapshot, snapshot, true) : description;
+			lastEntry.label = coalescedDesc.label;
+			lastEntry.detail = coalescedDesc.detail;
+			lastEntry.timestamp = now.toISOString();
+			lastEntry.snapshot = snapshot;
+		} else {
+			customHistory.entries.push({
+				label: description.label,
+				detail: description.detail,
+				timestamp: now.toISOString(),
+				snapshot
+			});
+		}
+		if (customHistory.entries.length > PROFILE_HISTORY_LIMIT) {
+			customHistory.entries.splice(0, customHistory.entries.length - PROFILE_HISTORY_LIMIT);
+		}
+		customHistory.index = customHistory.entries.length - 1;
 		renderProfileHistory();
+		setProfileHistoryStatus('Session history (unsaved custom filter).');
 		return;
 	}
 	const profile = state.profiles.find(p => p.id === state.activeProfileId);
@@ -2312,35 +2631,46 @@ function applyProfileSnapshot(snapshot) {
 }
 
 function restoreProfileHistory(index) {
-	const profile = state.profiles.find(p => p.id === state.activeProfileId);
-	if (!profile || !Array.isArray(profile.history) || !profile.history[index]) return;
+	const ctx = getActiveHistoryContext();
+	const history = ctx.isProfile ? ctx.target.history : ctx.target.entries;
+	if (!Array.isArray(history) || !history[index]) return;
 
 	profileHistoryApplying = true;
 	let restored = false;
 	try {
-		restored = applyProfileSnapshot(profile.history[index].snapshot);
+		restored = applyProfileSnapshot(history[index].snapshot);
 	} finally {
 		profileHistoryApplying = false;
 	}
 	if (!restored) return;
-	profile.historyIndex = index;
-	Object.assign(profile, getProfileSnapshot());
-	renderProfileHistory();
-	updateProfileActionLabels();
-	setProfileHistoryStatus(isActiveProfileDirty() ? 'Unsaved changes. Save Changes to keep them.' : 'No unsaved changes.');
+	if (ctx.isProfile) {
+		ctx.target.historyIndex = index;
+		Object.assign(ctx.target, getProfileSnapshot());
+		renderProfileHistory();
+		updateProfileActionLabels();
+		setProfileHistoryStatus(isActiveProfileDirty() ? 'Unsaved changes. Save Changes to keep them.' : 'No unsaved changes.');
+	} else {
+		ctx.target.index = index;
+		renderProfileHistory();
+		setProfileHistoryStatus('Restored session step (custom filter).');
+	}
 }
 
 function undoProfileHistory() {
-	const profile = state.profiles.find(p => p.id === state.activeProfileId);
-	if (profile && (profile.historyIndex || 0) > 0) {
-		restoreProfileHistory(profile.historyIndex - 1);
+	const ctx = getActiveHistoryContext();
+	const history = ctx.isProfile ? ctx.target.history : ctx.target.entries;
+	const idx = ctx.isProfile ? (ctx.target.historyIndex || 0) : (ctx.target.index || 0);
+	if (Array.isArray(history) && idx > 0) {
+		restoreProfileHistory(idx - 1);
 	}
 }
 
 function redoProfileHistory() {
-	const profile = state.profiles.find(p => p.id === state.activeProfileId);
-	if (profile && Array.isArray(profile.history) && (profile.historyIndex || 0) < profile.history.length - 1) {
-		restoreProfileHistory(profile.historyIndex + 1);
+	const ctx = getActiveHistoryContext();
+	const history = ctx.isProfile ? ctx.target.history : ctx.target.entries;
+	const idx = ctx.isProfile ? (ctx.target.historyIndex || 0) : (ctx.target.index || 0);
+	if (Array.isArray(history) && idx < history.length - 1) {
+		restoreProfileHistory(idx + 1);
 	}
 }
 
@@ -2356,6 +2686,7 @@ function applyProfile(profileId) {
 	}
 
 	if (!profileId) {
+		updateCodeViewers(compileGroupToAST(state.ruleTree), true);
 		renderProfileHistory();
 		updateProfileActionLabels();
 		return;
@@ -2641,8 +2972,38 @@ function hasPendingProfileSave() {
 	return !profile || profile.name !== name;
 }
 
+function applyTheme(theme, persist = true) {
+	const normalized = (theme === 'light' || theme === 'dark') ? theme : 'auto';
+	const meta = document.querySelector('meta[name="color-scheme"]');
+	document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === normalized));
+	if (normalized === 'auto') {
+		document.documentElement.removeAttribute('data-theme');
+		if (meta) meta.content = 'light dark';
+		if (persist) {
+			try { localStorage.removeItem('color-scheme'); } catch (_) {}
+		}
+	} else {
+		document.documentElement.setAttribute('data-theme', normalized);
+		if (meta) meta.content = normalized;
+		if (persist) {
+			try { localStorage.setItem('color-scheme', normalized); } catch (_) {}
+		}
+	}
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 	setupDialogLightDismissFallback();
+	let initialTheme = 'auto';
+	try {
+		const savedTheme = localStorage.getItem('color-scheme');
+		if (savedTheme === 'light' || savedTheme === 'dark') initialTheme = savedTheme;
+	} catch (_) {}
+	applyTheme(initialTheme, false);
+	window.addEventListener('storage', (event) => {
+		if (event.key === 'color-scheme') {
+			applyTheme(event.newValue || 'auto', false);
+		}
+	});
 	bootstrapApp();
 	window.addEventListener('beforeunload', event => {
 		if (!isActiveProfileDirty() && !hasPendingProfileSave()) return;
@@ -2659,11 +3020,36 @@ document.addEventListener('DOMContentLoaded', () => {
 	}
 
 	document.addEventListener('keydown', (event) => {
+		const assetDialog = document.getElementById('asset-dialog');
+		if (assetDialog && assetDialog.open && !event.ctrlKey && !event.metaKey && !event.altKey) {
+			if (event.key === 'ArrowLeft' && state.lightboxIndex > 0) {
+				event.preventDefault();
+				openAssetModal(state.lightboxIndex - 1);
+				return;
+			}
+			if (event.key === 'ArrowRight' && state.lightboxIndex >= 0 && state.lightboxIndex < state.lastAssets.length - 1) {
+				event.preventDefault();
+				openAssetModal(state.lightboxIndex + 1);
+				return;
+			}
+		}
+
 		if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+		if (event.key.toLowerCase() === 's') {
+			event.preventDefault();
+			const activeProf = state.profiles.find(item => item.id === state.activeProfileId);
+			if (state.activeProfileId && (isActiveProfileDirty() || (activeProf && activeProf.pendingSync))) {
+				saveActiveProfile();
+			} else {
+				openSaveProfileModal(false);
+			}
+			return;
+		}
 		const target = event.target;
 		if (target instanceof Element && target.matches('input, textarea, select, [contenteditable="true"]')) return;
-		const activeProfile = state.profiles.find(p => p.id === state.activeProfileId);
-		if (!activeProfile || !Array.isArray(activeProfile.history) || activeProfile.history.length < 2) return;
+		const ctx = getActiveHistoryContext();
+		const history = ctx.isProfile ? ctx.target.history : ctx.target.entries;
+		if (!Array.isArray(history) || history.length < 2) return;
 		if (event.key.toLowerCase() === 'z') {
 			event.preventDefault();
 			if (event.shiftKey) redoProfileHistory();
@@ -2723,6 +3109,27 @@ document.addEventListener('DOMContentLoaded', () => {
 				const d = document.getElementById('asset-dialog');
 				if (d) d.close();
 				filterByAccount(accountBtn.dataset.filterAccount);
+				return;
+			}
+			const quickBtn = e.target.closest('[data-quick-field]');
+			if (quickBtn) {
+				addQuickFilterFromAsset(quickBtn.dataset.quickField, quickBtn.dataset.quickValue);
+			}
+		});
+	}
+
+	const lightboxPrevBtn = document.getElementById('btn-lightbox-prev');
+	if (lightboxPrevBtn) {
+		lightboxPrevBtn.addEventListener('click', () => {
+			if (state.lightboxIndex > 0) openAssetModal(state.lightboxIndex - 1);
+		});
+	}
+
+	const lightboxNextBtn = document.getElementById('btn-lightbox-next');
+	if (lightboxNextBtn) {
+		lightboxNextBtn.addEventListener('click', () => {
+			if (state.lightboxIndex >= 0 && state.lightboxIndex < state.lastAssets.length - 1) {
+				openAssetModal(state.lightboxIndex + 1);
 			}
 		});
 	}
@@ -2741,13 +3148,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	// Theme switcher
 	document.querySelectorAll('.theme-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
-			const theme = btn.dataset.theme;
-			document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b === btn));
-			if (theme === 'auto') {
-				document.documentElement.removeAttribute('data-theme');
-			} else {
-				document.documentElement.setAttribute('data-theme', theme);
-			}
+			applyTheme(btn.dataset.theme, true);
 		});
 	});
 
@@ -2823,11 +3224,39 @@ document.addEventListener('DOMContentLoaded', () => {
 		deleteProfileBtn.addEventListener('click', () => handleDeleteProfile());
 	}
 
+	const discardProfileBtn = document.getElementById('btn-discard-profile');
+	if (discardProfileBtn) {
+		discardProfileBtn.addEventListener('click', () => {
+			discardActiveProfileChanges();
+		});
+	}
+
+	const clearFilterBtn = document.getElementById('btn-clear-filter');
+	if (clearFilterBtn) {
+		clearFilterBtn.addEventListener('click', () => {
+			state.ruleTree = { id: 'root', type: 'group', combiner: 'AND', children: [] };
+			renderRuleTree();
+			syncFromRuleTree();
+		});
+	}
+
 	const undoProfileBtn = document.getElementById('btn-undo-profile');
-	if (undoProfileBtn) undoProfileBtn.addEventListener('click', undoProfileHistory);
+	if (undoProfileBtn) {
+		undoProfileBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			undoProfileHistory();
+		});
+	}
 
 	const redoProfileBtn = document.getElementById('btn-redo-profile');
-	if (redoProfileBtn) redoProfileBtn.addEventListener('click', redoProfileHistory);
+	if (redoProfileBtn) {
+		redoProfileBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			redoProfileHistory();
+		});
+	}
 
 	const saveProfileForm = document.getElementById('save-profile-form');
 	if (saveProfileForm) {
@@ -2880,7 +3309,8 @@ document.addEventListener('DOMContentLoaded', () => {
 					setJsonSyncStatus('dirty', '✏️ Valid JSON — click Apply to Tree');
 				}
 			} catch (err) {
-				setJsonSyncStatus('error', '⚠️ Syntax Error');
+				const msg = (err && err.message ? err.message : 'Syntax Error').split('\n')[0];
+				setJsonSyncStatus('error', `⚠️ ${msg}`);
 			}
 		});
 

@@ -329,6 +329,229 @@ window.rtDuplicateRule = function(ruleId) {
 	syncFromRuleTree();
 };
 
+// --------------------------------------------------------------------------
+// Selection & Regrouping (move existing conditions into subgroups)
+// --------------------------------------------------------------------------
+
+// Selected node IDs live outside `state` so selection never pollutes history snapshots.
+const selectedRuleNodeIds = new Set();
+
+// Returns the ancestor group chain (root first) for the node with `id`, or null.
+function findNodePath(group, id, path = []) {
+	if (!group || group.type !== 'group') return null;
+	const nextPath = [...path, group];
+	for (const child of group.children || []) {
+		if (child.id === id) return nextPath;
+		if (child.type === 'group') {
+			const res = findNodePath(child, id, nextPath);
+			if (res) return res;
+		}
+	}
+	return null;
+}
+
+function collectNodeIds(node, out = new Set()) {
+	if (!node) return out;
+	if (node.id) out.add(node.id);
+	if (node.type === 'group') (node.children || []).forEach(child => collectNodeIds(child, out));
+	return out;
+}
+
+function pruneRuleSelection() {
+	const valid = collectNodeIds(state.ruleTree);
+	for (const id of [...selectedRuleNodeIds]) {
+		if (id === state.ruleTree.id || !valid.has(id)) selectedRuleNodeIds.delete(id);
+	}
+}
+
+// Selected nodes in document order, skipping nodes whose ancestor group is also
+// selected (they travel with that ancestor).
+function getEffectiveSelection(tree, selectedIds) {
+	const result = [];
+	(function visit(group) {
+		for (const child of group.children || []) {
+			if (selectedIds.has(child.id)) {
+				result.push(child);
+			} else if (child.type === 'group') {
+				visit(child);
+			}
+		}
+	})(tree);
+	return result;
+}
+
+// Removes non-root groups that were emptied by a move.
+function pruneEmptiedGroups(tree, candidateIds) {
+	for (const id of candidateIds) {
+		if (id === tree.id) continue;
+		const info = findGroupAndIndex(tree, id);
+		if (info && info.node.type === 'group' && info.node.children.length === 0) {
+			info.parent.children.splice(info.index, 1);
+		}
+	}
+}
+
+// Wraps the selected nodes into a new subgroup placed inside their deepest common
+// ancestor, at the position of the first selected node. Returns the new group or null.
+function groupNodesIntoSubgroup(tree, selectedIds) {
+	const nodes = getEffectiveSelection(tree, selectedIds);
+	if (!nodes.length) return null;
+
+	const paths = nodes.map(node => findNodePath(tree, node.id));
+	if (paths.some(p => !p)) return null;
+	let depth = 0;
+	while (paths.every(p => depth < p.length && p[depth] === paths[0][depth])) depth++;
+	const lca = paths[0][depth - 1];
+
+	// The direct child of the LCA that contains (or is) the first selected node.
+	const firstPath = paths[0];
+	const anchorId = depth < firstPath.length ? firstPath[depth].id : nodes[0].id;
+
+	const isAnd = (lca.combiner || 'AND').toUpperCase() === 'AND';
+	const newGroup = {
+		id: generateNodeId('g'),
+		type: 'group',
+		combiner: isAnd ? 'OR' : 'AND',
+		children: []
+	};
+	const anchorIndex = lca.children.findIndex(child => child.id === anchorId);
+	lca.children.splice(anchorIndex < 0 ? lca.children.length : anchorIndex, 0, newGroup);
+
+	const sourceParents = new Set();
+	for (const node of nodes) {
+		const info = findGroupAndIndex(tree, node.id);
+		if (!info) continue;
+		sourceParents.add(info.parent.id);
+		info.parent.children.splice(info.index, 1);
+		newGroup.children.push(node);
+	}
+	sourceParents.delete(newGroup.id);
+	pruneEmptiedGroups(tree, sourceParents);
+	return newGroup;
+}
+
+// Groups that may receive the selected nodes (excludes selected groups and their descendants).
+function getMoveTargetGroups(tree, selectedIds) {
+	const nodes = getEffectiveSelection(tree, selectedIds);
+	const excluded = new Set();
+	nodes.forEach(node => {
+		if (node.type === 'group') collectNodeIds(node, excluded);
+	});
+	const parentIds = new Set(nodes.map(node => {
+		const path = findNodePath(tree, node.id);
+		return path ? path[path.length - 1].id : null;
+	}));
+	const targets = [];
+	(function visit(group, depth) {
+		if (excluded.has(group.id)) return;
+		// Skip the only parent when every selected node already lives there (no-op move).
+		const isNoop = parentIds.size === 1 && parentIds.has(group.id);
+		if (!isNoop) targets.push({ group, depth });
+		for (const child of group.children || []) {
+			if (child.type === 'group') visit(child, depth + 1);
+		}
+	})(tree, 0);
+	return targets;
+}
+
+function moveNodesToGroup(tree, selectedIds, targetGroupId) {
+	const target = findNode(tree, targetGroupId);
+	if (!target || target.type !== 'group') return false;
+	const nodes = getEffectiveSelection(tree, selectedIds);
+	if (!nodes.length) return false;
+	const forbidden = new Set();
+	nodes.forEach(node => {
+		if (node.type === 'group') collectNodeIds(node, forbidden);
+	});
+	if (forbidden.has(target.id)) return false;
+
+	const sourceParents = new Set();
+	for (const node of nodes) {
+		const info = findGroupAndIndex(tree, node.id);
+		if (!info) continue;
+		sourceParents.add(info.parent.id);
+		info.parent.children.splice(info.index, 1);
+		target.children.push(node);
+	}
+	sourceParents.delete(target.id);
+	pruneEmptiedGroups(tree, sourceParents);
+	return true;
+}
+
+// Replaces a subgroup with its children, in place.
+function ungroupNode(tree, groupId) {
+	const info = findGroupAndIndex(tree, groupId);
+	if (!info || info.node.type !== 'group') return false;
+	info.parent.children.splice(info.index, 1, ...(info.node.children || []));
+	return true;
+}
+
+function describeGroupForMenu(group, isRoot) {
+	const combiner = (group.combiner || 'AND').toUpperCase() === 'AND' ? 'ALL' : 'ANY';
+	const rules = (group.children || []).filter(child => child.type === 'rule');
+	const subgroups = (group.children || []).length - rules.length;
+	const parts = rules.slice(0, 2).map(rule => getHistoryFieldLabel(rule.field));
+	if (rules.length > 2) parts.push(`+${rules.length - 2}`);
+	if (subgroups) parts.push(`${subgroups} subgroup${subgroups === 1 ? '' : 's'}`);
+	const name = isRoot ? 'Top level' : 'Subgroup';
+	return `${name} (${combiner})${parts.length ? ': ' + parts.join(', ') : ''}`;
+}
+
+window.rtToggleSelect = function(nodeId, checked) {
+	if (checked) selectedRuleNodeIds.add(nodeId);
+	else selectedRuleNodeIds.delete(nodeId);
+	renderRuleTree();
+};
+
+window.rtClearSelection = function() {
+	selectedRuleNodeIds.clear();
+	renderRuleTree();
+};
+
+window.rtGroupSelected = function() {
+	const newGroup = groupNodesIntoSubgroup(state.ruleTree, selectedRuleNodeIds);
+	if (!newGroup) return;
+	selectedRuleNodeIds.clear();
+	renderRuleTree();
+	syncFromRuleTree();
+};
+
+window.rtMoveSelectedTo = function(groupId) {
+	if (!groupId) return;
+	if (!moveNodesToGroup(state.ruleTree, selectedRuleNodeIds, groupId)) return;
+	selectedRuleNodeIds.clear();
+	renderRuleTree();
+	syncFromRuleTree();
+};
+
+window.rtUngroup = function(groupId) {
+	if (!ungroupNode(state.ruleTree, groupId)) return;
+	selectedRuleNodeIds.delete(groupId);
+	renderRuleTree();
+	syncFromRuleTree();
+};
+
+function renderSelectionBarHTML() {
+	const count = getEffectiveSelection(state.ruleTree, selectedRuleNodeIds).length;
+	if (!count) return '';
+	const targets = getMoveTargetGroups(state.ruleTree, selectedRuleNodeIds);
+	let moveOptions = '<option value="" selected>Move to…</option>';
+	for (const { group, depth } of targets) {
+		const indent = '\u00a0\u00a0'.repeat(depth) + (depth ? '↳ ' : '');
+		moveOptions += `<option value="${escapeHtml(group.id)}">${escapeHtml(indent + describeGroupForMenu(group, depth === 0))}</option>`;
+	}
+	return `
+		<div class="rt-selection-bar" role="toolbar" aria-label="Selected conditions">
+			<span class="rt-selection-count">${count} selected</span>
+			<button type="button" class="btn btn-xs btn-primary" onclick="rtGroupSelected()" title="Wrap the selected items in a new subgroup">⊞ Group into subgroup</button>
+			<select class="rt-select-move" onchange="rtMoveSelectedTo(this.value)" aria-label="Move selected items to an existing group" ${targets.length ? '' : 'disabled'}>
+				${moveOptions}
+			</select>
+			<button type="button" class="btn btn-xs btn-secondary" onclick="rtClearSelection()">Clear</button>
+		</div>
+	`;
+}
+
 function isMultiIdField(field) {
 	return ['people', 'albums', 'tags'].includes(field);
 }
@@ -462,19 +685,28 @@ window.rtFilterDropdown = function(ruleId, query) {
 function renderRuleTree() {
 	const mount = document.getElementById('rule-tree-mount');
 	if (!mount) return;
-	mount.innerHTML = renderGroupHTML(state.ruleTree, true);
+	pruneRuleSelection();
+	mount.innerHTML = renderSelectionBarHTML() + renderGroupHTML(state.ruleTree, true);
+}
+
+function renderSelectCheckboxHTML(nodeId, label) {
+	const checked = selectedRuleNodeIds.has(nodeId);
+	return `<input type="checkbox" class="rt-select-node" ${checked ? 'checked' : ''} onchange="rtToggleSelect('${escapeHtml(nodeId)}', this.checked)" title="Select to group or move" aria-label="${escapeHtml(label)}">`;
 }
 
 function renderGroupHTML(group, isRoot) {
 	const isAnd = (group.combiner || 'AND').toUpperCase() === 'AND';
 	const hasChildren = group.children && group.children.length > 0;
 	const delBtn = !isRoot
-		? `<button type="button" class="rt-btn-del" onclick="rtDeleteNode('${group.id}')" title="Delete subgroup">✕</button>`
+		? `<button type="button" class="rt-btn-ungroup" onclick="rtUngroup('${group.id}')" title="Ungroup (move conditions to parent)">⇱</button>
+		   <button type="button" class="rt-btn-del" onclick="rtDeleteNode('${group.id}')" title="Delete subgroup">✕</button>`
 		: '';
+	const selectBox = !isRoot ? renderSelectCheckboxHTML(group.id, 'Select subgroup') : '';
 
 	const header = `
 		<div class="rt-group-header">
 			<div class="rt-combiner-wrap">
+				${selectBox}
 				<div class="rt-combiner-pills">
 					<button type="button" class="rt-combiner-btn and ${isAnd ? 'active and' : ''}" onclick="rtSetCombiner('${group.id}', 'AND')">ALL (AND)</button>
 					<button type="button" class="rt-combiner-btn or ${!isAnd ? 'active or' : ''}" onclick="rtSetCombiner('${group.id}', 'OR')">ANY (OR)</button>
@@ -504,7 +736,7 @@ function renderGroupHTML(group, isRoot) {
 	childrenHTML += '</div>';
 
 	return `
-		<div class="rt-group ${isRoot ? 'rt-root' : 'rt-subgroup'}" id="${group.id}" data-combiner="${isAnd ? 'AND' : 'OR'}">
+		<div class="rt-group ${isRoot ? 'rt-root' : 'rt-subgroup'}${!isRoot && selectedRuleNodeIds.has(group.id) ? ' rt-selected' : ''}" id="${group.id}" data-combiner="${isAnd ? 'AND' : 'OR'}">
 			${header}
 			${childrenHTML}
 		</div>
@@ -650,7 +882,8 @@ function renderRuleHTML(rule) {
 	valueBox += `</div>`;
 
 	return `
-		<div class="rt-rule" id="${rule.id}">
+		<div class="rt-rule${selectedRuleNodeIds.has(rule.id) ? ' rt-selected' : ''}" id="${rule.id}">
+			${renderSelectCheckboxHTML(rule.id, 'Select condition')}
 			${fieldSelect}
 			${opSelect}
 			${valueBox}
@@ -2066,17 +2299,18 @@ function getProfileSnapshot() {
 }
 
 function getHistoryTreeNodes(tree) {
-	const nodes = { rules: new Map(), groups: new Map() };
-	function visit(node) {
+	const nodes = { rules: new Map(), groups: new Map(), parents: new Map() };
+	function visit(node, parentId) {
 		if (!node) return;
+		if (node.id) nodes.parents.set(node.id, parentId || '');
 		if (node.type === 'group') {
 			if (node.id) nodes.groups.set(node.id, node);
-			(node.children || []).forEach(visit);
+			(node.children || []).forEach(child => visit(child, node.id));
 		} else if (node.type === 'rule' && node.id) {
 			nodes.rules.set(node.id, node);
 		}
 	}
-	visit(tree);
+	visit(tree, '');
 	return nodes;
 }
 
@@ -2247,6 +2481,22 @@ function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false)
 	}
 
 	const details = [];
+	const movedRules = [...next.rules.values()].filter(rule =>
+		previous.rules.has(rule.id) && previous.parents.get(rule.id) !== next.parents.get(rule.id));
+	const createdGroups = [...next.groups.keys()].filter(id => !previous.groups.has(id)).length;
+	const removedGroups = [...previous.groups.keys()].filter(id => !next.groups.has(id)).length;
+	if (!added.length && !removed.length && !changed.length && !groupChanges.length) {
+		const structure = [];
+		if (movedRules.length) structure.push(`Moved ${summarizeHistoryRules(movedRules, includeMetadata)}`);
+		if (createdGroups) structure.push(`${createdGroups} subgroup${createdGroups === 1 ? '' : 's'} created`);
+		if (removedGroups) structure.push(`${removedGroups} subgroup${removedGroups === 1 ? '' : 's'} removed`);
+		if (structure.length) {
+			return {
+				label: createdGroups && !removedGroups ? 'Grouped conditions' : (removedGroups && !createdGroups ? 'Ungrouped conditions' : 'Moved conditions'),
+				detail: structure.join('; ')
+			};
+		}
+	}
 	if (added.length) details.push(`Added: ${summarizeHistoryRules(added, includeMetadata)}`);
 	if (removed.length) details.push(`Removed: ${summarizeHistoryRules(removed, includeMetadata)}`);
 	if (changed.length) details.push(`Changed: ${summarizeHistoryRules(changed, includeMetadata)}`);

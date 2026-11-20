@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [Unreleased]
+
+### Added
+- **Regroup Existing Conditions**: Each condition and subgroup now has a selection checkbox. With items selected, a sticky toolbar offers **Group into subgroup** (wraps the selection in a new subgroup at the deepest common level, keeping the first item's position) and **Move to…** (moves the selection into any existing group). Subgroups also get an **Ungroup** (`⇱`) button that moves their contents up to the parent. Groups left empty after a move are removed, and the Modification History labels these changes as *Grouped / Ungrouped / Moved conditions*.
+
 ## [1.7.0] - 2026-11-20
 
 ### Added

@@ -269,6 +269,9 @@ window.rtChangeOperator = function(ruleId, newOp) {
 		rule.value = (newOp === 'true');
 	} else if (rule.field === 'media_type' || rule.field === 'visibility') {
 		rule.value = newOp;
+	} else if (rule.field === 'date') {
+		if (newOp === 'after') delete rule.dateBefore;
+		else if (newOp === 'before') delete rule.dateAfter;
 	}
 	renderRuleTree();
 	syncFromRuleTree();
@@ -494,7 +497,7 @@ function renderRuleHTML(rule) {
 			chips += `
 				<span class="rt-chip" title="${escapeHtml(val)}">
 					<span>${escapeHtml(label)}</span>
-					<span class="rt-chip-x" onclick="rtRemoveMultiValue('${escapeJsString(rule.id)}', '${escapeJsString(val)}', event)">✕</span>
+					<button type="button" class="rt-chip-x" data-action="remove-chip" data-rule-id="${escapeHtml(rule.id)}" data-value="${escapeHtml(val)}" aria-label="Remove ${escapeHtml(label)}">✕</button>
 				</span>
 			`;
 		}
@@ -503,7 +506,7 @@ function renderRuleHTML(rule) {
 		for (const opt of available) {
 			const isSel = selectedVals.includes(opt.value);
 			dropdownItems += `
-				<div class="rt-dropdown-item ${isSel ? 'selected' : ''}" onclick="rtToggleMultiValue('${escapeJsString(rule.id)}', '${escapeJsString(opt.value)}', event)">
+				<div class="rt-dropdown-item ${isSel ? 'selected' : ''}" data-action="toggle-opt" data-rule-id="${escapeHtml(rule.id)}" data-value="${escapeHtml(opt.value)}">
 					<span>${escapeHtml(opt.label)}</span>
 					${isSel ? '<span>✓</span>' : ''}
 				</div>
@@ -511,18 +514,18 @@ function renderRuleHTML(rule) {
 		}
 
 		valueBox += `
-			<div class="rt-chips-container" onclick="rtOpenDropdown('${escapeJsString(rule.id)}', event)">
+			<div class="rt-chips-container" data-action="open-dd" data-rule-id="${escapeHtml(rule.id)}">
 				${chips}
 				<input
 					type="text"
 					class="rt-chip-input"
 					placeholder="${selectedVals.length ? '' : 'Search or type + Enter...'}"
-					onfocus="rtOpenDropdown('${escapeJsString(rule.id)}', event)"
-					oninput="rtFilterDropdown('${escapeJsString(rule.id)}', this.value)"
-					onkeydown="rtHandleChipKeydown('${escapeJsString(rule.id)}', event)"
+					onfocus="rtOpenDropdown('${escapeHtml(rule.id)}', event)"
+					oninput="rtFilterDropdown('${escapeHtml(rule.id)}', this.value)"
+					onkeydown="rtHandleChipKeydown('${escapeHtml(rule.id)}', event)"
 				>
 			</div>
-			<div class="rt-dropdown-menu scroller" id="dropdown_${escapeJsString(rule.id)}">
+			<div class="rt-dropdown-menu scroller" id="dropdown_${escapeHtml(rule.id)}">
 				${dropdownItems || '<div style="padding: 0.5rem 0.65rem; color: var(--text-muted); font-size: 0.75rem;">Type a value and press Enter</div>'}
 			</div>
 		`;
@@ -542,8 +545,12 @@ function renderRuleHTML(rule) {
 			`;
 		}
 	} else if (rule.field === 'rating') {
-		const curRating = parseInt(rule.value, 10) || 3;
-		valueBox += `<select class="rt-select-field" style="width: 100%;" onchange="rtSetScalarValue('${rule.id}', parseInt(this.value, 10))">`;
+		const parsedRating = parseInt(rule.value, 10);
+		const curRating = Number.isFinite(parsedRating) ? parsedRating : 3;
+		valueBox += `<select class="rt-select-field" style="width: 100%;" onchange="rtSetScalarValue('${escapeHtml(rule.id)}', parseInt(this.value, 10))">`;
+		if (curRating === 0) {
+			valueBox += `<option value="0" selected>Unrated (0 Stars)</option>`;
+		}
 		for (let r = 1; r <= 5; r++) {
 			valueBox += `<option value="${r}" ${curRating === r ? 'selected' : ''}>${'★'.repeat(r)} (${r} Star${r > 1 ? 's' : ''})</option>`;
 		}
@@ -584,7 +591,11 @@ function compileRuleToBranch(rule) {
 	if (['favorite', 'media_type', 'visibility', 'rating', 'has_people', 'has_albums', 'has_tags'].includes(field)) {
 		// Implicit scalar values
 	} else if (field === 'date') {
-		if (!rule.dateAfter && !rule.dateBefore) return null;
+		const needsAfter = operator === 'after' || operator === 'between' || !operator;
+		const needsBefore = operator === 'before' || operator === 'between';
+		const hasAfter = needsAfter && !!rule.dateAfter;
+		const hasBefore = needsBefore && !!rule.dateBefore;
+		if (!hasAfter && !hasBefore) return null;
 	} else if (['description', 'filename', 'ocr'].includes(field)) {
 		if (!value || String(value).trim() === '') return null;
 	} else {
@@ -642,7 +653,8 @@ function compileRuleToBranch(rule) {
 			break;
 		case 'rating': {
 			const op = ['gte', 'eq', 'lte'].includes(operator) ? operator : 'gte';
-			branch.rating = { [op]: parseInt(value, 10) || 3 };
+			const parsed = parseInt(value, 10);
+			branch.rating = { [op]: Number.isFinite(parsed) ? parsed : 3 };
 			break;
 		}
 		case 'has_people':
@@ -656,8 +668,12 @@ function compileRuleToBranch(rule) {
 			break;
 		case 'date':
 			branch.takenAt = {};
-			if (rule.dateAfter) branch.takenAt.gte = rule.dateAfter;
-			if (rule.dateBefore) branch.takenAt.lte = rule.dateBefore;
+			if ((operator === 'after' || operator === 'between' || !operator) && rule.dateAfter) {
+				branch.takenAt.gte = rule.dateAfter;
+			}
+			if ((operator === 'before' || operator === 'between') && rule.dateBefore) {
+				branch.takenAt.lte = rule.dateBefore;
+			}
 			break;
 		case 'description':
 			branch.description = { [operator || 'like']: String(value).trim() };
@@ -679,7 +695,15 @@ function mergeFilterBranches(left, right) {
 		const existing = merged[key];
 		if (existing && value && typeof existing === 'object' && typeof value === 'object' &&
 			!Array.isArray(existing) && !Array.isArray(value)) {
-			merged[key] = { ...existing, ...value };
+			const combined = { ...existing };
+			for (const [op, opVal] of Object.entries(value)) {
+				if (Array.isArray(combined[op]) && Array.isArray(opVal)) {
+					combined[op] = Array.from(new Set([...combined[op], ...opVal]));
+				} else {
+					combined[op] = opVal;
+				}
+			}
+			merged[key] = combined;
 		} else {
 			merged[key] = value;
 		}
@@ -784,45 +808,42 @@ function compileGroupToAST(group) {
 
 function parseFieldToRules(key, val, children) {
 	if (val === null || val === undefined) return;
-	if (key === 'personIds') {
-		const op = val.all ? 'all' : (val.none ? 'none' : 'any');
-		const list = Array.isArray(val) ? val : (val[op] || []);
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'people', operator: op, value: list });
-	} else if (key === 'albumIds') {
-		const op = val.all ? 'all' : (val.none ? 'none' : 'any');
-		const list = Array.isArray(val) ? val : (val[op] || []);
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'albums', operator: op, value: list });
-	} else if (key === 'tagIds') {
-		const op = val.all ? 'all' : (val.none ? 'none' : 'any');
-		const list = Array.isArray(val) ? val : (val[op] || []);
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'tags', operator: op, value: list });
-	} else if (['country', 'state', 'city'].includes(key)) {
-		if (typeof val === 'string') {
-			children.push({ id: generateNodeId('r'), type: 'rule', field: key, operator: 'eq', value: [val] });
-		} else if (Array.isArray(val)) {
-			children.push({ id: generateNodeId('r'), type: 'rule', field: key, operator: 'in', value: val });
-		} else {
-			const op = val.eq ? 'eq' : (val.notIn ? 'notIn' : 'in');
-			const v = val.eq ? [val.eq] : (val[op] || []);
-			children.push({ id: generateNodeId('r'), type: 'rule', field: key, operator: op, value: v });
+	if (key === 'personIds' || key === 'albumIds' || key === 'tagIds') {
+		const field = key === 'personIds' ? 'people' : (key === 'albumIds' ? 'albums' : 'tags');
+		if (Array.isArray(val)) {
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'any', value: val });
+		} else if (typeof val === 'string') {
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'any', value: [val] });
+		} else if (typeof val === 'object') {
+			for (const op of ['all', 'any', 'none']) {
+				if (Array.isArray(val[op]) && val[op].length > 0) {
+					children.push({ id: generateNodeId('r'), type: 'rule', field, operator: op, value: val[op] });
+				}
+			}
 		}
-	} else if (key === 'model') {
-		const op = val.eq ? 'eq' : (val.notIn ? 'notIn' : 'in');
-		const v = typeof val === 'string' ? [val] : (val.eq ? [val.eq] : (val[op] || []));
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'camera', operator: op, value: v });
-	} else if (key === 'make') {
-		const op = val.eq ? 'eq' : (val.notIn ? 'notIn' : 'in');
-		const v = typeof val === 'string' ? [val] : (val.eq ? [val.eq] : (val[op] || []));
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'make', operator: op, value: v });
-	} else if (key === 'lensModel') {
-		const op = val.eq ? 'eq' : (val.notIn ? 'notIn' : 'in');
-		const v = typeof val === 'string' ? [val] : (val.eq ? [val.eq] : (val[op] || []));
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'lens', operator: op, value: v });
+	} else if (['country', 'state', 'city', 'model', 'make', 'lensModel'].includes(key)) {
+		const field = key === 'model' ? 'camera' : (key === 'lensModel' ? 'lens' : key);
+		if (typeof val === 'string') {
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'eq', value: [val] });
+		} else if (Array.isArray(val)) {
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'in', value: val });
+		} else if (typeof val === 'object') {
+			if (val.eq !== undefined && val.eq !== '') {
+				children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'eq', value: [val.eq] });
+			}
+			for (const op of ['in', 'notIn']) {
+				if (Array.isArray(val[op]) && val[op].length > 0) {
+					children.push({ id: generateNodeId('r'), type: 'rule', field, operator: op, value: val[op] });
+				}
+			}
+		}
 	} else if (key === 'isFavorite') {
 		const boolVal = typeof val === 'boolean' ? val : !!val.eq;
 		children.push({ id: generateNodeId('r'), type: 'rule', field: 'favorite', operator: boolVal ? 'true' : 'false', value: boolVal });
 	} else if (key === 'isMotion') {
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'MOTION', value: 'MOTION' });
+		if (val === true || (typeof val === 'object' && val.eq === true)) {
+			children.push({ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'MOTION', value: 'MOTION' });
+		}
 	} else if (key === 'type') {
 		const t = typeof val === 'string' ? val : (val.in ? val.in[0] : (val.eq || 'IMAGE'));
 		children.push({ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: t, value: t });
@@ -832,10 +853,12 @@ function parseFieldToRules(key, val, children) {
 	} else if (key === 'rating') {
 		if (typeof val === 'number') {
 			children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'eq', value: val });
-		} else {
-			const op = val.eq !== undefined ? 'eq' : (val.lte !== undefined ? 'lte' : 'gte');
-			const num = val[op] || 3;
-			children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: op, value: num });
+		} else if (typeof val === 'object') {
+			for (const op of ['eq', 'gte', 'lte']) {
+				if (val[op] !== undefined && val[op] !== null) {
+					children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: op, value: val[op] });
+				}
+			}
 		}
 	} else if (key === 'hasPeople') {
 		const b = typeof val === 'boolean' ? val : !!val.eq;
@@ -851,12 +874,24 @@ function parseFieldToRules(key, val, children) {
 		const lte = (val.lte || '').slice(0, 10);
 		const op = (gte && lte) ? 'between' : (lte ? 'before' : 'after');
 		children.push({ id: generateNodeId('r'), type: 'rule', field: 'date', operator: op, dateAfter: gte, dateBefore: lte });
-	} else if (key === 'description') {
-		const op = Object.keys(val)[0] || 'like';
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'description', operator: op, value: val[op] || '' });
-	} else if (key === 'originalFileName') {
-		const op = Object.keys(val)[0] || 'like';
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'filename', operator: op, value: val[op] || '' });
+	} else if (key === 'description' || key === 'originalFileName') {
+		const field = key === 'originalFileName' ? 'filename' : 'description';
+		if (typeof val === 'string') {
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'like', value: val });
+		} else if (typeof val === 'object') {
+			const knownOps = ['like', 'notLike', 'eq', 'startsWith', 'endsWith'];
+			let pushed = false;
+			for (const op of knownOps) {
+				if (val[op] !== undefined) {
+					children.push({ id: generateNodeId('r'), type: 'rule', field, operator: op, value: val[op] || '' });
+					pushed = true;
+				}
+			}
+			if (!pushed) {
+				const firstOp = Object.keys(val)[0] || 'like';
+				children.push({ id: generateNodeId('r'), type: 'rule', field, operator: firstOp, value: val[firstOp] || '' });
+			}
+		}
 	} else if (key === 'ocr') {
 		children.push({ id: generateNodeId('r'), type: 'rule', field: 'ocr', operator: 'matches', value: val.matches || '' });
 	}
@@ -1120,7 +1155,15 @@ function renderSearchResults(data) {
 
 	if (emptyEl) emptyEl.hidden = true;
 	if (loadMoreWrap) {
-		loadMoreWrap.hidden = !((total > assets.length || !exact) && state.sampleSize < 240);
+		loadMoreWrap.hidden = !((total > assets.length || !exact) && state.sampleSize < 200);
+		const loadMoreBtn = document.getElementById('btn-load-more');
+		if (loadMoreBtn) {
+			let nextSize = 200;
+			if (state.sampleSize < 48) nextSize = 48;
+			else if (state.sampleSize < 96) nextSize = 96;
+			else if (state.sampleSize < 144) nextSize = 144;
+			loadMoreBtn.textContent = `Load More Assets (show ${nextSize})`;
+		}
 	}
 
 	if (gridEl) {
@@ -1142,7 +1185,7 @@ function renderSearchResults(data) {
 							${item.type === 'VIDEO' ? '<span class="badge-pill badge-video">▶ VIDEO</span>' : ''}
 							${item.isFavorite ? '<span class="badge-pill badge-fav">♥</span>' : ''}
 							${item.rating > 0 ? `<span class="badge-pill badge-rating">★ ${item.rating}</span>` : ''}
-							${item.user ? `<button type="button" class="badge-pill badge-user interactive-badge" onclick="event.stopPropagation(); filterByAccount('${escapeHtml(item.user)}')" title="Click to filter by @${escapeHtml(item.user)}">@${escapeHtml(item.user)}</button>` : ''}
+							${item.user ? `<button type="button" class="badge-pill badge-user interactive-badge" data-filter-account="${escapeHtml(item.user)}" title="Click to filter by @${escapeHtml(item.user)}">@${escapeHtml(item.user)}</button>` : ''}
 						</div>
 					</div>
 					<div class="asset-meta">
@@ -1193,7 +1236,7 @@ window.openAssetModal = function(index) {
 			${item.user ? `
 			<div class="meta-row">
 				<span class="meta-label">Account</span>
-				<span class="meta-val"><button type="button" class="badge-pill badge-user interactive-badge" onclick="const d = document.getElementById('asset-dialog'); if (d) d.close(); filterByAccount('${escapeHtml(item.user)}')" title="Filter by @${escapeHtml(item.user)}">@${escapeHtml(item.user)}</button></span>
+				<span class="meta-val"><button type="button" class="badge-pill badge-user interactive-badge" data-filter-account="${escapeHtml(item.user)}" title="Filter by @${escapeHtml(item.user)}">@${escapeHtml(item.user)}</button></span>
 			</div>` : ''}
 			${item.takenAt ? `
 			<div class="meta-row">
@@ -1236,28 +1279,30 @@ window.openAssetModal = function(index) {
 };
 
 function setupDialogLightDismissFallback() {
-	const dialog = document.getElementById('asset-dialog');
-	if (!dialog) return;
-
-	// Stop playing video when modal closes
-	dialog.addEventListener('close', () => {
-		const bodyEl = document.getElementById('asset-dialog-body');
-		if (bodyEl) bodyEl.innerHTML = '';
-	});
+	const assetDialog = document.getElementById('asset-dialog');
+	if (assetDialog) {
+		// Stop playing video when modal closes
+		assetDialog.addEventListener('close', () => {
+			const bodyEl = document.getElementById('asset-dialog-body');
+			if (bodyEl) bodyEl.innerHTML = '';
+		});
+	}
 
 	// Mandatory fallback for browsers without closedby="any" support
 	if (!('closedBy' in HTMLDialogElement.prototype)) {
-		dialog.addEventListener('click', (event) => {
-			if (event.target !== dialog) return;
-			const rect = dialog.getBoundingClientRect();
-			const isDialogContent = (
-				rect.top <= event.clientY &&
-				event.clientY <= rect.top + rect.height &&
-				rect.left <= event.clientX &&
-				event.clientX <= rect.left + rect.width
-			);
-			if (isDialogContent) return;
-			dialog.close();
+		document.querySelectorAll('dialog[closedby="any"]').forEach(dialog => {
+			dialog.addEventListener('click', (event) => {
+				if (event.target !== dialog) return;
+				const rect = dialog.getBoundingClientRect();
+				const isDialogContent = (
+					rect.top <= event.clientY &&
+					event.clientY <= rect.top + rect.height &&
+					rect.left <= event.clientX &&
+					event.clientX <= rect.left + rect.width
+				);
+				if (isDialogContent) return;
+				dialog.close();
+			});
 		});
 	}
 }
@@ -1415,7 +1460,7 @@ function renderAccountMenu() {
 
 	const isAllActive = !state.selectedUser;
 	let itemsHtml = `
-		<button type="button" class="account-menu-item ${isAllActive ? 'active' : ''}" onclick="selectAccount('')" role="option" aria-selected="${isAllActive}">
+		<button type="button" class="account-menu-item ${isAllActive ? 'active' : ''}" data-select-account="" role="option" aria-selected="${isAllActive}">
 			<span>👥 All Accounts (${state.accounts.length})</span>
 			<span class="account-item-status ok" title="Queries all accounts in parallel"></span>
 		</button>
@@ -1426,7 +1471,7 @@ function renderAccountMenu() {
 		const isActive = (state.selectedUser === acc);
 		const isOk = healthMap[acc] !== false;
 		return `
-			<button type="button" class="account-menu-item ${isActive ? 'active' : ''}" onclick="selectAccount('${escapeHtml(acc)}')" role="option" aria-selected="${isActive}">
+			<button type="button" class="account-menu-item ${isActive ? 'active' : ''}" data-select-account="${escapeHtml(acc)}" role="option" aria-selected="${isActive}">
 				<span>👤 @${escapeHtml(acc)}</span>
 				<span class="account-item-status ${isOk ? 'ok' : 'err'}" title="${isOk ? 'Active & authenticated' : 'Metadata query reported warnings/errors'}"></span>
 			</button>
@@ -1434,6 +1479,40 @@ function renderAccountMenu() {
 	}).join('');
 
 	menuPopover.innerHTML = itemsHtml;
+}
+
+async function fetchMetadataForUser(user, forceRefresh = false) {
+	const query = user ? `?user=${encodeURIComponent(user)}` : '';
+	const endpoint = forceRefresh ? '/api/metadata/refresh' : '/api/metadata';
+	const method = forceRefresh ? 'POST' : 'GET';
+	try {
+		const resp = await fetch(endpoint + query, { method });
+		const data = await resp.json();
+		if (data.metadata) state.metadata = data.metadata;
+		if (data.accountHealth) {
+			const healthMap = {};
+			(state.accountDetails || []).forEach(a => { healthMap[a.name] = a.valid; });
+			Object.keys(data.accountHealth).forEach(k => { healthMap[k] = data.accountHealth[k]; });
+			const names = state.accounts.length > 0 ? state.accounts : Object.keys(healthMap);
+			state.accountDetails = names.map(name => ({
+				name,
+				valid: healthMap[name] !== false
+			}));
+			renderAccountMenu();
+		}
+		const banner = document.getElementById('global-warning-banner');
+		if (banner) {
+			if (data.warnings && data.warnings.length > 0) {
+				banner.hidden = false;
+				banner.textContent = '⚠️ ' + data.warnings.join(' | ');
+			} else {
+				banner.hidden = true;
+			}
+		}
+		renderRuleTree();
+	} catch (e) {
+		console.warn('Metadata fetch failed:', e);
+	}
 }
 
 window.selectAccount = async function(accountName) {
@@ -1453,21 +1532,7 @@ window.selectAccount = async function(accountName) {
 	}
 	window.history.replaceState({}, '', url);
 
-	try {
-		const resp = await fetch('/api/metadata/refresh' + (state.selectedUser ? `?user=${encodeURIComponent(state.selectedUser)}` : ''), {
-			method: 'POST'
-		});
-		const data = await resp.json();
-		if (data.metadata) state.metadata = data.metadata;
-		if (data.accountHealth) {
-			state.accountDetails = Object.keys(data.accountHealth).map(k => ({ name: k, valid: data.accountHealth[k] }));
-			renderAccountMenu();
-		}
-		renderRuleTree();
-	} catch (e) {
-		console.warn('Metadata refresh failed on account switch:', e);
-	}
-
+	await fetchMetadataForUser(state.selectedUser, false);
 	syncFromRuleTree();
 };
 
@@ -1660,6 +1725,9 @@ async function loadProfiles() {
 	}
 
 	state.profiles = Array.from(profileMap.values());
+	if (serverProfilesLoaded) {
+		saveProfilesToLocalStorage(state.profiles);
+	}
 	savedProfileSnapshots.clear();
 	for (const profile of state.profiles) {
 		savedProfileSnapshots.set(profile.id, JSON.stringify(profile));
@@ -1762,7 +1830,10 @@ function getHistoryRuleValue(rule, includeMetadata = false) {
 		if (rule.operator === 'between') {
 			return [rule.dateAfter, rule.dateBefore].filter(Boolean).join(' to ');
 		}
-		return rule.dateAfter || rule.dateBefore || '';
+		if (rule.operator === 'before') {
+			return rule.dateBefore || '';
+		}
+		return rule.dateAfter || '';
 	}
 	if (Array.isArray(rule.value)) {
 		if (!rule.value.length) return '';
@@ -1839,8 +1910,8 @@ function summarizeHistoryRules(rules, includeMetadata = false) {
 function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false) {
 	const previous = getHistoryTreeNodes(previousTree);
 	const next = getHistoryTreeNodes(nextTree);
-	const added = [...next.rules.values()].filter(rule => !previous.rules.has(rule.id));
-	const removed = [...previous.rules.values()].filter(rule => !next.rules.has(rule.id));
+	let added = [...next.rules.values()].filter(rule => !previous.rules.has(rule.id));
+	let removed = [...previous.rules.values()].filter(rule => !next.rules.has(rule.id));
 	const changed = [...next.rules.values()].filter(rule => {
 		const oldRule = previous.rules.get(rule.id);
 		if (!oldRule) return false;
@@ -1852,6 +1923,23 @@ function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false)
 		const oldGroup = previous.groups.get(group.id);
 		return oldGroup && (oldGroup.combiner || 'AND') !== (group.combiner || 'AND');
 	});
+
+	if (added.length > 0 && removed.length > 0) {
+		const ruleSignature = r => JSON.stringify([r.field, r.operator, r.value, r.dateAfter || '', r.dateBefore || '']);
+		const removedRemaining = [...removed];
+		const filteredAdded = [];
+		for (const r of added) {
+			const sig = ruleSignature(r);
+			const matchIdx = removedRemaining.findIndex(rem => ruleSignature(rem) === sig);
+			if (matchIdx >= 0) {
+				removedRemaining.splice(matchIdx, 1);
+			} else {
+				filteredAdded.push(r);
+			}
+		}
+		added = filteredAdded;
+		removed = removedRemaining;
+	}
 
 	if (added.length === 1 && !removed.length && !changed.length && !groupChanges.length) {
 		const rule = added[0];
@@ -1899,9 +1987,9 @@ function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false)
 	}
 
 	const details = [];
-	if (added.length) details.push(`Added: ${summarizeHistoryRules(added)}`);
-	if (removed.length) details.push(`Removed: ${summarizeHistoryRules(removed)}`);
-	if (changed.length) details.push(`Changed: ${summarizeHistoryRules(changed)}`);
+	if (added.length) details.push(`Added: ${summarizeHistoryRules(added, includeMetadata)}`);
+	if (removed.length) details.push(`Removed: ${summarizeHistoryRules(removed, includeMetadata)}`);
+	if (changed.length) details.push(`Changed: ${summarizeHistoryRules(changed, includeMetadata)}`);
 	if (groupChanges.length) details.push(`${groupChanges.length} group logic change${groupChanges.length === 1 ? '' : 's'}`);
 	return {
 		label: 'Updated filters',
@@ -1943,7 +2031,7 @@ function getProfileHistoryEntryDescription(history, index) {
 		return { label: entry.label || 'Updated profile', detail: entry.detail };
 	}
 	if (previous && previous.snapshot && entry.snapshot) {
-		return getHistoryDescription(previous.snapshot, entry.snapshot);
+		return getHistoryDescription(previous.snapshot, entry.snapshot, true);
 	}
 	return { label: entry.label || 'Updated profile', detail: '' };
 }
@@ -2060,6 +2148,10 @@ async function saveActiveProfile() {
 			body: JSON.stringify(profile)
 		});
 		if (!response.ok) throw new Error(`Profile save failed (${response.status})`);
+		const data = await response.json();
+		if (data.profile && data.profile.updatedAt) {
+			profile.updatedAt = data.profile.updatedAt;
+		}
 		savedToServer = true;
 	} catch (err) {
 		console.warn('Could not save profile to server:', err);
@@ -2165,9 +2257,11 @@ function recordProfileHistory() {
 	const description = getHistoryDescription(previous, snapshot, true);
 	const now = new Date();
 	const lastEntry = profile.history[profile.history.length - 1];
+	const baseSnapshot = profile.history.length >= 2 ? profile.history[profile.history.length - 2].snapshot : null;
 	if (wasAtHistoryEnd && lastEntry && lastEntry.label === description.label && now.getTime() - new Date(lastEntry.timestamp).getTime() < 750) {
-		lastEntry.label = description.label;
-		lastEntry.detail = description.detail;
+		const coalescedDesc = baseSnapshot ? getHistoryDescription(baseSnapshot, snapshot, true) : description;
+		lastEntry.label = coalescedDesc.label;
+		lastEntry.detail = coalescedDesc.detail;
 		lastEntry.timestamp = now.toISOString();
 		lastEntry.snapshot = snapshot;
 	} else {
@@ -2194,6 +2288,7 @@ function applyProfileSnapshot(snapshot) {
 		setProfileHistoryStatus('Cannot restore an invalid history entry.', true);
 		return false;
 	}
+	const previousUser = state.selectedUser;
 	state.ruleTree = JSON.parse(JSON.stringify(snapshot.ruleTree));
 	state.searchMode = snapshot.searchMode || 'random';
 	state.selectedUser = snapshot.user || '';
@@ -2210,6 +2305,9 @@ function applyProfileSnapshot(snapshot) {
 	syncToolbarControls();
 	renderRuleTree();
 	syncFromRuleTree();
+	if (previousUser !== state.selectedUser) {
+		fetchMetadataForUser(state.selectedUser, false);
+	}
 	return true;
 }
 
@@ -2266,6 +2364,7 @@ function applyProfile(profileId) {
 	// Load custom saved profile
 	const prof = state.profiles.find(p => p.id === profileId);
 	if (prof) {
+		const previousUser = state.selectedUser;
 		profileHistoryApplying = true;
 		try {
 			if (prof.ruleTree && typeof prof.ruleTree === 'object') {
@@ -2297,6 +2396,9 @@ function applyProfile(profileId) {
 			syncToolbarControls();
 			renderRuleTree();
 			syncFromRuleTree();
+			if (previousUser !== state.selectedUser) {
+				fetchMetadataForUser(state.selectedUser, false);
+			}
 		} finally {
 			profileHistoryApplying = false;
 		}
@@ -2342,6 +2444,7 @@ function openSaveProfileModal(asCopy = false) {
 			: (state.activeProfileId ? '✏️ Rename Profile' : '💾 Save Search Profile');
 	}
 	if (confirmButton) {
+		confirmButton.disabled = false;
 		confirmButton.textContent = asCopy
 			? 'Save Copy'
 			: (state.activeProfileId ? 'Rename Profile' : 'Save Profile');
@@ -2367,8 +2470,6 @@ async function handleSaveProfileSubmit(e) {
 	const name = nameInput ? nameInput.value.trim() : '';
 	if (!name) return;
 
-	const filterEditor = document.getElementById('filter-json-editor');
-	const rawFilterJson = filterEditor ? filterEditor.value : '{}';
 	const snapshot = getProfileSnapshot();
 	const sourceProfileId = saveProfileAsCopy ? state.activeProfileId : '';
 	const id = !saveProfileAsCopy && state.activeProfileId && state.activeProfileId.startsWith('prof_')
@@ -2381,7 +2482,7 @@ async function handleSaveProfileSubmit(e) {
 	const profileData = {
 		id: id,
 		name: name,
-		filterJson: rawFilterJson,
+		filterJson: snapshot.filterJson,
 		ruleTree: snapshot.ruleTree,
 		searchMode: state.searchMode,
 		user: state.selectedUser,
@@ -2390,6 +2491,7 @@ async function handleSaveProfileSubmit(e) {
 		orderByDirection: state.orderByDirection,
 		includeVideos: state.includeVideos,
 		includeArchived: state.includeArchived,
+		createdAt: existingProfile && existingProfile.createdAt ? existingProfile.createdAt : undefined,
 		updatedAt: new Date().toISOString(),
 		history: (existingProfile || {}).history || [{
 			label: copiedFrom ? `Copied from ${copiedFrom}` : 'Profile saved',
@@ -2403,77 +2505,80 @@ async function handleSaveProfileSubmit(e) {
 	if (confirmButton) confirmButton.disabled = true;
 	let savedToServer = false;
 	try {
-		const resp = await fetch('/api/profiles', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(profileData)
-		});
-		if (!resp.ok) throw new Error(`Profile save failed (${resp.status})`);
-		const data = await resp.json();
-		if (!data.profile || !data.profile.id) throw new Error('Profile save response did not include an ID');
-		profileData.id = data.profile.id;
-		profileData.updatedAt = data.profile.updatedAt || profileData.updatedAt;
-		savedToServer = true;
-	} catch (err) {
-		console.warn('Saving profile to server failed:', err);
-		if (!profileData.id) {
-			profileData.id = 'prof_' + Date.now();
+		try {
+			const resp = await fetch('/api/profiles', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(profileData)
+			});
+			if (!resp.ok) throw new Error(`Profile save failed (${resp.status})`);
+			const data = await resp.json();
+			if (!data.profile || !data.profile.id) throw new Error('Profile save response did not include an ID');
+			profileData.id = data.profile.id;
+			profileData.createdAt = data.profile.createdAt || profileData.createdAt;
+			profileData.updatedAt = data.profile.updatedAt || profileData.updatedAt;
+			savedToServer = true;
+		} catch (err) {
+			console.warn('Saving profile to server failed:', err);
+			if (!profileData.id) {
+				profileData.id = 'prof_' + Date.now();
+			}
 		}
-	}
-	if (savedToServer) {
-		delete profileData.pendingSync;
-		profileData.serverBacked = true;
-	} else {
-		profileData.pendingSync = true;
-		if (existingProfile && existingProfile.serverBacked) profileData.serverBacked = true;
-	}
-
-	const nextProfiles = [...state.profiles];
-	if (sourceProfileId && isProfileDirty(sourceProfileId)) {
-		const sourceSnapshot = savedProfileSnapshots.get(sourceProfileId);
-		const sourceIndex = nextProfiles.findIndex(p => p.id === sourceProfileId);
-		if (sourceIndex >= 0) {
-			if (sourceSnapshot === undefined) nextProfiles.splice(sourceIndex, 1);
-			else nextProfiles[sourceIndex] = JSON.parse(sourceSnapshot);
+		if (savedToServer) {
+			delete profileData.pendingSync;
+			profileData.serverBacked = true;
+		} else {
+			profileData.pendingSync = true;
+			if (existingProfile && existingProfile.serverBacked) profileData.serverBacked = true;
 		}
-	}
 
-	const idx = nextProfiles.findIndex(p => p.id === profileData.id);
-	if (idx >= 0) {
-		nextProfiles[idx] = profileData;
-	} else {
-		nextProfiles.push(profileData);
-	}
+		const nextProfiles = [...state.profiles];
+		if (sourceProfileId && isProfileDirty(sourceProfileId)) {
+			const sourceSnapshot = savedProfileSnapshots.get(sourceProfileId);
+			const sourceIndex = nextProfiles.findIndex(p => p.id === sourceProfileId);
+			if (sourceIndex >= 0) {
+				if (sourceSnapshot === undefined) nextProfiles.splice(sourceIndex, 1);
+				else nextProfiles[sourceIndex] = JSON.parse(sourceSnapshot);
+			}
+		}
 
-	const savedLocally = saveProfilesToLocalStorage(nextProfiles);
-	if (!savedToServer && !savedLocally) {
+		const idx = nextProfiles.findIndex(p => p.id === profileData.id);
+		if (idx >= 0) {
+			nextProfiles[idx] = profileData;
+		} else {
+			nextProfiles.push(profileData);
+		}
+
+		const savedLocally = saveProfilesToLocalStorage(nextProfiles);
+		if (!savedToServer && !savedLocally) {
+			setProfileHistoryStatus('Could not save the profile. Check the server or browser storage and try again.', true);
+			return;
+		}
+
+		state.profiles = nextProfiles;
+		savedProfileSnapshots.set(profileData.id, JSON.stringify(profileData));
+		state.activeProfileId = profileData.id;
+		saveProfileAsCopy = false;
+		if (dialog) dialog.close();
+		renderProfilesDropdown();
+		renderProfileHistory();
+		setProfileHistoryStatus(
+			savedToServer ? 'Saved to server profile storage.' : 'Saved in this browser only; server save failed.',
+			!savedToServer
+		);
+	} finally {
 		if (confirmButton) confirmButton.disabled = false;
-		setProfileHistoryStatus('Could not save the profile. Check the server or browser storage and try again.', true);
-		return;
 	}
-
-	state.profiles = nextProfiles;
-	savedProfileSnapshots.set(profileData.id, JSON.stringify(profileData));
-	state.activeProfileId = profileData.id;
-	saveProfileAsCopy = false;
-	if (dialog) dialog.close();
-	renderProfilesDropdown();
-	renderProfileHistory();
-	setProfileHistoryStatus(
-		savedToServer ? 'Saved to server profile storage.' : 'Saved in this browser only; server save failed.',
-		!savedToServer
-	);
 }
 
 async function handleDeleteProfile() {
 	if (!state.activeProfileId || !state.activeProfileId.startsWith('prof_')) return;
 	const idToDelete = state.activeProfileId;
-	const initialProfile = state.profiles.find(p => p.id === idToDelete);
-	const name = initialProfile ? initialProfile.name : 'this profile';
-	if (isProfileDirty(idToDelete) && !(await resolveUnsavedProfileChanges())) return;
 	const profile = state.profiles.find(p => p.id === idToDelete);
 	if (!profile) return;
-	if (!confirm(`Are you sure you want to delete profile "${name}"?`)) {
+	const name = profile.name || 'this profile';
+	const dirtyNotice = isProfileDirty(idToDelete) ? ' Any unsaved changes will also be lost.' : '';
+	if (!confirm(`Are you sure you want to delete profile "${name}"?${dirtyNotice}`)) {
 		return;
 	}
 
@@ -2496,10 +2601,7 @@ async function handleDeleteProfile() {
 	const profilesWithDeletionMarker = state.profiles.map(item =>
 		item.id === idToDelete ? { ...item, deletePending: true } : item
 	);
-	if (!saveProfilesToLocalStorage(profilesWithDeletionMarker)) {
-		setProfileHistoryStatus('Could not prepare the profile deletion in browser storage; it was not deleted.', true);
-		return;
-	}
+	saveProfilesToLocalStorage(profilesWithDeletionMarker);
 
 	try {
 		const response = await fetch(`/api/profiles/${encodeURIComponent(idToDelete)}`, {
@@ -2524,7 +2626,7 @@ async function handleDeleteProfile() {
 	state.activeProfileId = '';
 	renderProfilesDropdown();
 	renderProfileHistory();
-	setProfileHistoryStatus(savedLocally ? 'Profile deleted.' : 'Profile deleted from server; the saved deletion marker will remove it on reload.', !savedLocally);
+	setProfileHistoryStatus(savedLocally ? 'Profile deleted.' : 'Profile deleted from server.', !savedLocally);
 }
 
 function hasPendingProfileSave() {
@@ -2580,6 +2682,62 @@ document.addEventListener('DOMContentLoaded', () => {
 		document.querySelectorAll('.rt-dropdown-menu.open').forEach(el => el.classList.remove('open'));
 	});
 
+	// Delegated events for rule tree chips & dropdown options
+	const ruleTreeMount = document.getElementById('rule-tree-mount');
+	if (ruleTreeMount) {
+		ruleTreeMount.addEventListener('click', (e) => {
+			const chipX = e.target.closest('[data-action="remove-chip"]');
+			if (chipX) {
+				rtRemoveMultiValue(chipX.dataset.ruleId, chipX.dataset.value, e);
+				return;
+			}
+			const ddItem = e.target.closest('[data-action="toggle-opt"]');
+			if (ddItem) {
+				rtToggleMultiValue(ddItem.dataset.ruleId, ddItem.dataset.value, e);
+				return;
+			}
+			const ddWrap = e.target.closest('[data-action="open-dd"]');
+			if (ddWrap) {
+				rtOpenDropdown(ddWrap.dataset.ruleId, e);
+			}
+		});
+	}
+
+	// Delegated account filtering on asset grid & asset dialog
+	const assetsGrid = document.getElementById('assets-grid');
+	if (assetsGrid) {
+		assetsGrid.addEventListener('click', (e) => {
+			const accountBtn = e.target.closest('[data-filter-account]');
+			if (accountBtn) {
+				e.stopPropagation();
+				filterByAccount(accountBtn.dataset.filterAccount);
+			}
+		});
+	}
+
+	const assetDialogBody = document.getElementById('asset-dialog-body');
+	if (assetDialogBody) {
+		assetDialogBody.addEventListener('click', (e) => {
+			const accountBtn = e.target.closest('[data-filter-account]');
+			if (accountBtn) {
+				const d = document.getElementById('asset-dialog');
+				if (d) d.close();
+				filterByAccount(accountBtn.dataset.filterAccount);
+			}
+		});
+	}
+
+	// Delegated account selection in topbar account menu
+	const accountMenuPopover = document.getElementById('account-menu-popover');
+	if (accountMenuPopover) {
+		accountMenuPopover.addEventListener('click', (e) => {
+			const itemBtn = e.target.closest('[data-select-account]');
+			if (itemBtn) {
+				selectAccount(itemBtn.dataset.selectAccount || '');
+			}
+		});
+	}
+
 	// Theme switcher
 	document.querySelectorAll('.theme-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
@@ -2632,12 +2790,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			const origText = refreshBtn.innerHTML;
 			refreshBtn.innerHTML = '<span>↻ Loading...</span>';
 			try {
-				const resp = await fetch('/api/metadata/refresh' + (state.selectedUser ? `?user=${encodeURIComponent(state.selectedUser)}` : ''), {
-					method: 'POST'
-				});
-				const data = await resp.json();
-				if (data.metadata) state.metadata = data.metadata;
-				renderRuleTree();
+				await fetchMetadataForUser(state.selectedUser, true);
 			} finally {
 				refreshBtn.disabled = false;
 				refreshBtn.innerHTML = origText;
@@ -2775,6 +2928,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	// Search Mode (Random vs Metadata)
 	document.querySelectorAll('.seg-btn[data-search-mode], .mode-toggle-btn[data-search-mode]').forEach(btn => {
 		btn.addEventListener('click', () => {
+			if (btn.dataset.searchMode === state.searchMode) return;
 			state.searchMode = btn.dataset.searchMode;
 			syncToolbarControls();
 			syncFromRuleTree();
@@ -2839,7 +2993,6 @@ document.addEventListener('DOMContentLoaded', () => {
 			else if (state.sampleSize < 144) state.sampleSize = 144;
 			else state.sampleSize = 200;
 			syncToolbarControls();
-			recordProfileHistory();
 			runLiveSearch();
 		});
 	}

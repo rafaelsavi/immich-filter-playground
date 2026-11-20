@@ -5,6 +5,15 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<!-- MANDATORY: Declare support for both light and dark themes -->
 	<meta name="color-scheme" content="light dark">
+	<script>
+		try {
+			const saved = localStorage.getItem('color-scheme');
+			if (saved === 'light' || saved === 'dark') {
+				document.querySelector('meta[name="color-scheme"]').content = saved;
+				document.documentElement.setAttribute('data-theme', saved);
+			}
+		} catch (_) {}
+	</script>
 	<title>Immich Filter Playground — Search API v2</title>
 	<link rel="icon" type="image/svg+xml" href="/logo.svg">
 	<link rel="stylesheet" href="/styles.css">
@@ -89,31 +98,38 @@
 								<button type="button" class="btn btn-xs btn-secondary" id="btn-save-profile" title="Save the current filter as a new profile">
 									<span>💾 Save as Profile</span>
 								</button>
+								<button type="button" class="btn btn-xs btn-ghost text-danger" id="btn-discard-profile" title="Discard unsaved profile changes" hidden>
+									<span>↺ Discard</span>
+								</button>
 								<button type="button" class="btn btn-xs btn-secondary" id="btn-copy-profile" title="Create a separate profile from the current filter">
 									<span>⧉ Save as Copy</span>
 								</button>
 								<button type="button" class="btn btn-xs btn-ghost text-danger" id="btn-delete-profile" title="Delete selected custom profile" hidden>
 									<span>🗑️</span>
 								</button>
+								<button type="button" class="btn btn-xs btn-ghost" id="btn-clear-filter" title="Clear all filter rules">
+									<span>Clear</span>
+								</button>
 							</div>
 						</div>
 					</div>
 
 					<div id="rule-tree-mount" class="rule-tree-container"></div>
-					<section class="profile-history-panel" aria-labelledby="profile-history-title">
-						<div class="profile-history-header">
-							<div>
-								<h3 id="profile-history-title">Modification History</h3>
-								<span class="panel-subtitle">Changes are drafts until you save the profile</span>
+					<details id="profile-history-details" class="profile-history-panel profile-history-details">
+						<summary class="profile-history-header">
+							<div class="profile-history-title-wrap">
+								<span class="history-chevron" aria-hidden="true">▸</span>
+								<h3>Modification History</h3>
+								<span id="profile-history-count" class="history-count-badge">0</span>
 							</div>
 							<div class="profile-history-actions">
 								<button type="button" class="btn btn-xs btn-secondary" id="btn-undo-profile" disabled title="Undo (Ctrl+Z)">↶ Undo</button>
 								<button type="button" class="btn btn-xs btn-secondary" id="btn-redo-profile" disabled title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
 							</div>
-						</div>
-						<div id="profile-history-status" class="profile-history-status" role="status">Select a profile to track changes.</div>
+						</summary>
+						<div id="profile-history-status" class="profile-history-status" role="status">Edit filters to track session changes, or select a profile.</div>
 						<ol id="profile-history-list" class="profile-history-list" aria-label="Profile modification history"></ol>
-					</section>
+					</details>
 				</div>
 
 				<!-- Card 2: Live JSON Editor & API Payload (Always visible below the tree!) -->
@@ -289,7 +305,7 @@
 					<!-- Load More Footer -->
 					<div id="load-more-wrap" class="load-more-wrap" hidden>
 						<button type="button" class="btn btn-secondary" id="btn-load-more">
-							Load More Assets (+24)
+							Load More Assets
 						</button>
 					</div>
 				</div>
@@ -335,7 +351,7 @@
 	</dialog>
 
 	<dialog id="unsaved-profile-dialog" closedby="any" aria-labelledby="unsaved-profile-title" aria-describedby="unsaved-profile-message">
-		<div class="dialog-content">
+		<div class="dialog-content unsaved-profile-content">
 			<div class="dialog-header">
 				<h3 id="unsaved-profile-title">Unsaved Profile Changes</h3>
 				<button type="button" class="btn-icon" data-unsaved-action="cancel" aria-label="Keep editing">✕</button>
@@ -397,9 +413,14 @@
 		<div class="dialog-content">
 			<div class="dialog-header">
 				<h3 id="asset-dialog-title">Asset Details</h3>
-				<form method="dialog">
-					<button type="submit" class="btn-icon" aria-label="Close modal">✕</button>
-				</form>
+				<div class="lightbox-header-actions">
+					<button type="button" class="btn btn-xs btn-secondary" id="btn-lightbox-prev" title="Previous asset (←)" aria-label="Previous asset">←</button>
+					<span id="lightbox-counter" class="lightbox-counter">1 / 1</span>
+					<button type="button" class="btn btn-xs btn-secondary" id="btn-lightbox-next" title="Next asset (→)" aria-label="Next asset">→</button>
+					<form method="dialog">
+						<button type="submit" class="btn-icon" aria-label="Close modal">✕</button>
+					</form>
+				</div>
 			</div>
 			<div class="dialog-body" id="asset-dialog-body"></div>
 		</div>

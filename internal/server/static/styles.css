@@ -37,6 +37,9 @@
 	--accent-soft-light: #e0f2fe;
 	--accent-soft-dark: #0c4a6e;
 
+	--focus-ring-light: rgba(2, 132, 199, 0.22);
+	--focus-ring-dark: rgba(56, 189, 248, 0.28);
+
 	--violet-light: #7c3aed;
 	--violet-dark: #a78bfa;
 
@@ -57,6 +60,7 @@
 	--border-strong: var(--border-strong-light);
 	--accent-color: var(--accent-light);
 	--accent-soft: var(--accent-soft-light);
+	--focus-ring: var(--focus-ring-light);
 	--violet-color: var(--violet-light);
 	--scrollbar-thumb: var(--scrollbar-thumb-light);
 	--scrollbar-track: var(--scrollbar-track-light);
@@ -74,6 +78,7 @@
 		--border-strong: var(--border-strong-dark);
 		--accent-color: var(--accent-dark);
 		--accent-soft: var(--accent-soft-dark);
+		--focus-ring: var(--focus-ring-dark);
 		--violet-color: var(--violet-dark);
 		--scrollbar-thumb: var(--scrollbar-thumb-dark);
 		--scrollbar-track: var(--scrollbar-track-dark);
@@ -92,6 +97,7 @@
 		--border-strong: light-dark(var(--border-strong-light), var(--border-strong-dark));
 		--accent-color: light-dark(var(--accent-light), var(--accent-dark));
 		--accent-soft: light-dark(var(--accent-soft-light), var(--accent-soft-dark));
+		--focus-ring: light-dark(var(--focus-ring-light), var(--focus-ring-dark));
 		--violet-color: light-dark(var(--violet-light), var(--violet-dark));
 		--scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
 		--scrollbar-track: light-dark(var(--scrollbar-track-light), var(--scrollbar-track-dark));
@@ -102,6 +108,13 @@
 	accent-color: var(--accent-color);
 	scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 	scrollbar-width: thin;
+
+	&:has(> head > meta[name="color-scheme"][content="light"]) {
+		color-scheme: light;
+	}
+	&:has(> head > meta[name="color-scheme"][content="dark"]) {
+		color-scheme: dark;
+	}
 }
 
 :root[data-theme="light"] {
@@ -117,6 +130,7 @@
 	--border-strong: var(--border-strong-light);
 	--accent-color: var(--accent-light);
 	--accent-soft: var(--accent-soft-light);
+	--focus-ring: var(--focus-ring-light);
 	--violet-color: var(--violet-light);
 	--scrollbar-thumb: var(--scrollbar-thumb-light);
 	--scrollbar-track: var(--scrollbar-track-light);
@@ -135,6 +149,7 @@
 	--border-strong: var(--border-strong-dark);
 	--accent-color: var(--accent-dark);
 	--accent-soft: var(--accent-soft-dark);
+	--focus-ring: var(--focus-ring-dark);
 	--violet-color: var(--violet-dark);
 	--scrollbar-thumb: var(--scrollbar-thumb-dark);
 	--scrollbar-track: var(--scrollbar-track-dark);
@@ -428,25 +443,65 @@ p, blockquote, li, .pretty-text {
 .profile-history-panel {
 	border-top: 1px solid var(--border-color);
 	margin-top: 1rem;
-	padding-top: 0.85rem;
+	padding-top: 0.75rem;
 }
 
-.profile-history-header {
+.profile-history-details > summary.profile-history-header {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 0.75rem;
+	cursor: pointer;
+	list-style: none;
+	user-select: none;
+}
+
+.profile-history-details > summary.profile-history-header::-webkit-details-marker {
+	display: none;
+}
+
+.profile-history-title-wrap {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	min-width: 0;
+}
+
+.history-chevron {
+	display: inline-block;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	transition: transform 0.15s ease;
+}
+
+.profile-history-details[open] .history-chevron {
+	transform: rotate(90deg);
+}
+
+.history-count-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.3rem;
+	padding: 0.08rem 0.38rem;
+	border-radius: 9999px;
+	font-size: 0.68rem;
+	font-weight: 700;
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-color);
+	color: var(--text-secondary);
 }
 
 .profile-history-header h3 {
-	font-size: 0.88rem;
+	font-size: 0.86rem;
 	font-weight: 700;
-	margin-bottom: 0.15rem;
+	margin: 0;
 }
 
 .profile-history-actions {
 	display: flex;
 	gap: 0.35rem;
+	flex-shrink: 0;
 }
 
 .profile-history-status {
@@ -493,7 +548,7 @@ p, blockquote, li, .pretty-text {
 
 .profile-history-entry:hover,
 .profile-history-entry.active {
-	background: var(--bg-card);
+	background: var(--bg-subtle);
 	border-color: var(--border-color);
 	color: var(--text-primary);
 }
@@ -528,9 +583,9 @@ p, blockquote, li, .pretty-text {
 }
 
 .profile-select {
-	background: var(--bg-card);
+	background: var(--bg-subtle);
 	color: var(--text-primary);
-	border: 1px solid var(--border-color);
+	border: 1px solid var(--border-strong);
 	border-radius: 0.38rem;
 	padding: 0.28rem 0.55rem;
 	font-size: 0.78rem;
@@ -543,20 +598,26 @@ p, blockquote, li, .pretty-text {
 
 .profile-select:focus {
 	border-color: var(--accent-color);
-	box-shadow: 0 0 0 2px var(--accent-subtle);
+	box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .profile-select optgroup {
 	font-weight: 700;
 	color: var(--text-secondary);
-	background: var(--bg-card);
+	background: var(--bg-surface);
 }
 
 .profile-select option {
 	font-weight: 500;
 	color: var(--text-primary);
-	background: var(--bg-card);
+	background: var(--bg-surface);
 	padding: 4px;
+}
+
+.btn-unsaved {
+	border-color: var(--accent-color) !important;
+	background: var(--accent-soft) !important;
+	color: var(--accent-color) !important;
 }
 
 /* Buttons */
@@ -788,7 +849,8 @@ p, blockquote, li, .pretty-text {
 	position: relative;
 }
 
-.rt-btn-del {
+.rt-btn-del,
+.rt-btn-dup {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -807,6 +869,11 @@ p, blockquote, li, .pretty-text {
 .rt-btn-del:hover {
 	background: rgba(239, 68, 68, 0.15);
 	color: #ef4444;
+}
+
+.rt-btn-dup:hover {
+	background: var(--accent-soft);
+	color: var(--accent-color);
 }
 
 /* Multi-select Chips & Dropdown */
@@ -888,6 +955,11 @@ p, blockquote, li, .pretty-text {
 
 .rt-dropdown-item:hover {
 	background: var(--bg-subtle);
+}
+
+.rt-dropdown-item.highlighted {
+	background: var(--bg-elevated);
+	outline: 1px solid var(--accent-color);
 }
 
 .rt-dropdown-item.selected {
@@ -1166,7 +1238,7 @@ p, blockquote, li, .pretty-text {
 	font-weight: 600;
 	border-radius: 0.4rem;
 	border: 1px solid var(--border-strong);
-	background: var(--bg-card);
+	background: var(--bg-surface);
 	color: var(--text-primary);
 	cursor: pointer;
 	outline: none;
@@ -1429,8 +1501,52 @@ dialog#asset-dialog::backdrop {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: 0.75rem;
 	padding: 0.9rem 1.25rem;
 	border-bottom: 1px solid var(--border-color);
+}
+
+.lightbox-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	flex-shrink: 0;
+}
+
+.lightbox-counter {
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	min-width: 3.2rem;
+	text-align: center;
+}
+
+.meta-filter-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+}
+
+.meta-filter-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	padding: 0.16rem 0.48rem;
+	border-radius: 9999px;
+	border: 1px solid var(--border-strong);
+	background: var(--bg-subtle);
+	color: var(--text-primary);
+	font: inherit;
+	font-size: 0.74rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.meta-filter-btn:hover {
+	border-color: var(--accent-color);
+	background: var(--accent-soft);
+	color: var(--accent-color);
 }
 
 .dialog-body {
@@ -1538,9 +1654,9 @@ dialog#save-profile-dialog::backdrop {
 }
 
 .form-input {
-	background: var(--bg-card);
+	background: var(--bg-surface);
 	color: var(--text-primary);
-	border: 1px solid var(--border-color);
+	border: 1px solid var(--border-strong);
 	border-radius: 0.45rem;
 	padding: 0.55rem 0.75rem;
 	font-size: 0.88rem;
@@ -1550,11 +1666,11 @@ dialog#save-profile-dialog::backdrop {
 
 .form-input:focus {
 	border-color: var(--accent-color);
-	box-shadow: 0 0 0 3px var(--accent-subtle);
+	box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .profile-options-summary {
-	background: var(--bg-card);
+	background: var(--bg-subtle);
 	border: 1px solid var(--border-color);
 	border-radius: 0.5rem;
 	padding: 0.85rem;
@@ -1586,6 +1702,43 @@ dialog#save-profile-dialog::backdrop {
 
 .text-danger {
 	color: var(--danger-color, #ef4444) !important;
+}
+
+/* ==========================================================================
+   Unsaved Profile Dialog
+   ========================================================================== */
+dialog#unsaved-profile-dialog {
+	border: 1px solid var(--border-strong);
+	border-radius: 0.9rem;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	padding: 0;
+	width: 90vw;
+	max-width: 460px;
+	box-shadow: 0 20px 45px rgba(0, 0, 0, 0.4);
+}
+
+dialog#unsaved-profile-dialog::backdrop {
+	background-color: rgba(15, 23, 42, 0.65);
+	backdrop-filter: blur(3px);
+}
+
+.unsaved-profile-content {
+	display: flex;
+	flex-direction: column;
+}
+
+.unsaved-profile-content .dialog-body {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	padding: 1.25rem;
+}
+
+.unsaved-profile-content .dialog-body p {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: 0.88rem;
 }
 
 

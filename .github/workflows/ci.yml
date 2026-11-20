@@ -122,7 +122,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-          VERSION: ${{ needs.check_release.outputs.tag }}
+          VERSION: ${{ needs.check_release.outputs.version }}
         run: |
           go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist/${{ matrix.output_name }} .
 
@@ -235,4 +235,4 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ needs.check_release.outputs.tag }}
+            VERSION=${{ needs.check_release.outputs.version }}

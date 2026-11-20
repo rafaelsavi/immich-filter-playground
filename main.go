@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,8 +26,9 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show version information and exit")
 	flag.Parse()
 
+	displayVersion := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if *showVersion {
-		fmt.Printf("immich-filter-playground v%s\n", version)
+		fmt.Printf("immich-filter-playground v%s\n", displayVersion)
 		return
 	}
 
@@ -68,7 +70,7 @@ func main() {
 		displayHost = "localhost"
 	}
 
-	log.Printf("⚡ Immich Filter Playground v%s listening on http://%s:%d", version, displayHost, cfg.Server.Port)
+	log.Printf("⚡ Immich Filter Playground v%s listening on http://%s:%d", displayVersion, displayHost, cfg.Server.Port)
 	if cfg.IsConfigured() {
 		log.Printf("🔗 Connected to Immich: %s (accounts: %d)", cfg.Immich.URL, len(cfg.AccountNames()))
 	} else {

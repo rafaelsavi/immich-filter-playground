@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -68,13 +70,61 @@ func (ps *profileStore) Load() ([]SearchProfile, error) {
 	return profiles, nil
 }
 
+const maxProfileHistoryEntries = 50
+
+func writeFileAtomic(filePath string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(filePath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	} else {
+		dir = "."
+	}
+
+	tmpFile, err := os.CreateTemp(dir, ".profiles-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Chmod(perm); err != nil {
+		// Ignore Chmod errors on filesystems that don't support POSIX modes
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, filePath); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
 func (ps *profileStore) Save(p SearchProfile) (SearchProfile, error) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	var profiles []SearchProfile
-	if data, err := os.ReadFile(ps.filePath); err == nil {
-		_ = json.Unmarshal(data, &profiles)
+	data, err := os.ReadFile(ps.filePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return p, fmt.Errorf("reading existing profiles: %w", err)
+		}
+	} else if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &profiles); err != nil {
+			return p, fmt.Errorf("parsing existing profiles: %w", err)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -104,11 +154,11 @@ func (ps *profileStore) Save(p SearchProfile) (SearchProfile, error) {
 		profiles = append(profiles, p)
 	}
 
-	data, err := json.MarshalIndent(profiles, "", "  ")
+	out, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
 		return p, err
 	}
-	if err := os.WriteFile(ps.filePath, data, 0644); err != nil {
+	if err := writeFileAtomic(ps.filePath, out, 0644); err != nil {
 		return p, err
 	}
 	return p, nil
@@ -149,7 +199,7 @@ func (ps *profileStore) Delete(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return true, os.WriteFile(ps.filePath, out, 0644)
+	return true, writeFileAtomic(ps.filePath, out, 0644)
 }
 
 func (s *Server) handleGetProfiles(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +212,7 @@ func (s *Server) handleGetProfiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
 	var p SearchProfile
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid profile payload: " + err.Error()})
@@ -171,6 +222,20 @@ func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
 	if p.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Profile name is required"})
 		return
+	}
+	if len(p.History) > maxProfileHistoryEntries {
+		drop := len(p.History) - maxProfileHistoryEntries
+		p.History = p.History[drop:]
+		p.HistoryIndex -= drop
+	}
+	if len(p.History) == 0 {
+		p.HistoryIndex = 0
+	} else {
+		if p.HistoryIndex < 0 {
+			p.HistoryIndex = 0
+		} else if p.HistoryIndex >= len(p.History) {
+			p.HistoryIndex = len(p.History) - 1
+		}
 	}
 	saved, err := s.profiles.Save(p)
 	if err != nil {

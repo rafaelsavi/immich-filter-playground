@@ -421,12 +421,27 @@ func (c *Client) SearchMetadata(ctx context.Context, apiKey string, filter Searc
 	return response, nil
 }
 
+type cachedAssetCount struct {
+	total int
+	exact bool
+}
+
 // CountAssets counts matching assets using cursor pagination on /api/search/metadata up to maxCount.
 func (c *Client) CountAssets(ctx context.Context, apiKey string, filter SearchFilter, maxCount int, includeVideos, includeArchived bool) (int, bool, error) {
 	if maxCount <= 0 {
 		maxCount = 5000
 	}
 	effectiveFilter := ApplyDefaultConstraints(filter, includeVideos, includeArchived)
+
+	var cacheKey string
+	if filterBytes, err := json.Marshal(effectiveFilter); err == nil {
+		cacheKey = fmt.Sprintf("count:%s:%d:%s", apiKey, maxCount, string(filterBytes))
+		if cached, ok := c.getCache(cacheKey); ok {
+			if res, ok := cached.(cachedAssetCount); ok {
+				return res.total, res.exact, nil
+			}
+		}
+	}
 
 	total := 0
 	cursor := ""
@@ -462,8 +477,11 @@ func (c *Client) CountAssets(ctx context.Context, apiKey string, filter SearchFi
 		}
 		total += pageCount
 
-		if resp.Assets.NextCursor == "" || pageCount < 1000 || total >= maxCount {
-			isExact := resp.Assets.NextCursor == "" || pageCount < 1000
+		if resp.Assets.NextCursor == "" || pageCount == 0 || total >= maxCount {
+			isExact := resp.Assets.NextCursor == "" || pageCount == 0
+			if cacheKey != "" {
+				c.setCache(cacheKey, cachedAssetCount{total: total, exact: isExact}, 45*time.Second)
+			}
 			return total, isExact, nil
 		}
 		cursor = resp.Assets.NextCursor

@@ -59,6 +59,7 @@ func (s *Server) routes() {
 	})
 
 	s.mux.HandleFunc("GET /api/bootstrap", s.handleBootstrap)
+	s.mux.HandleFunc("GET /api/metadata", s.handleGetMetadata)
 	s.mux.HandleFunc("POST /api/metadata/refresh", s.handleRefreshMetadata)
 	s.mux.HandleFunc("POST /api/search", s.handleSearch)
 	s.mux.HandleFunc("GET /api/media/{kind}/{id}", s.handleMediaProxy)
@@ -77,7 +78,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		localDir := filepath.Join("internal", "server", "static")
-		if r.URL.Path == "/" {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			var index []byte
 			var err error
 			if info, statErr := os.Stat(localDir); statErr == nil && info.IsDir() {
@@ -90,8 +91,12 @@ func (s *Server) routes() {
 				return
 			}
 
+			displayVersion := ""
+			if v := strings.TrimSpace(s.version); v != "" {
+				displayVersion = "v" + strings.TrimPrefix(v, "v")
+			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte(strings.ReplaceAll(string(index), "{{APP_VERSION}}", s.version)))
+			_, _ = w.Write([]byte(strings.ReplaceAll(string(index), "{{APP_VERSION}}", displayVersion)))
 			return
 		}
 		if info, err := os.Stat(localDir); err == nil && info.IsDir() {

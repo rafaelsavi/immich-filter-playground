@@ -3,10 +3,12 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"immich-filter-playground/internal/config"
@@ -107,17 +109,33 @@ func TestBootstrapAndSearchWithMockImmich(t *testing.T) {
 		t.Errorf("unexpected health response: %+v", healthResp)
 	}
 
-	reqIndex := httptest.NewRequest(http.MethodGet, "/", nil)
-	recIndex := httptest.NewRecorder()
-	srv.ServeHTTP(recIndex, reqIndex)
-	if recIndex.Code != http.StatusOK {
-		t.Fatalf("expected 200 from /, got %d", recIndex.Code)
+	for _, path := range []string{"/", "/index.html"} {
+		reqIndex := httptest.NewRequest(http.MethodGet, path, nil)
+		recIndex := httptest.NewRecorder()
+		srv.ServeHTTP(recIndex, reqIndex)
+		if recIndex.Code != http.StatusOK {
+			t.Fatalf("expected 200 from %s, got %d", path, recIndex.Code)
+		}
+		if !bytes.Contains(recIndex.Body.Bytes(), []byte("vtest-version")) ||
+			bytes.Contains(recIndex.Body.Bytes(), []byte("vvtest-version")) ||
+			!bytes.Contains(recIndex.Body.Bytes(), []byte("https://github.com/rafaelsavi/immich-filter-playground")) ||
+			bytes.Contains(recIndex.Body.Bytes(), []byte("{{APP_VERSION}}")) {
+			t.Errorf("%s did not render version and repository link cleanly", path)
+		}
 	}
-	if !bytes.Contains(recIndex.Body.Bytes(), []byte("vtest-version")) ||
-		bytes.Contains(recIndex.Body.Bytes(), []byte("vvtest-version")) ||
-		!bytes.Contains(recIndex.Body.Bytes(), []byte("https://github.com/rafaelsavi/immich-filter-playground")) ||
-		bytes.Contains(recIndex.Body.Bytes(), []byte("{{APP_VERSION}}")) {
-		t.Errorf("application page did not render version and repository link")
+
+	srvBareVer := New(cfg, "1.6.2")
+	for _, path := range []string{"/", "/index.html"} {
+		reqBare := httptest.NewRequest(http.MethodGet, path, nil)
+		recBare := httptest.NewRecorder()
+		srvBareVer.ServeHTTP(recBare, reqBare)
+		if recBare.Code != http.StatusOK {
+			t.Fatalf("expected 200 from %s (bare version), got %d", path, recBare.Code)
+		}
+		if !bytes.Contains(recBare.Body.Bytes(), []byte("v1.6.2")) ||
+			bytes.Contains(recBare.Body.Bytes(), []byte("vv1.6.2")) {
+			t.Errorf("%s did not normalize bare semver to v1.6.2", path)
+		}
 	}
 
 	// 4. Test Search Profiles Endpoints
@@ -252,5 +270,108 @@ func TestBootstrapWithMultipleAccounts(t *testing.T) {
 	}
 	if health["bob"] {
 		t.Errorf("expected bob to be invalid due to 401")
+	}
+}
+
+func TestMetadataCacheAndRefresh(t *testing.T) {
+	var peopleHits atomic.Int32
+	mockImmich := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/people":
+			peopleHits.Add(1)
+			_, _ = w.Write([]byte(`{"people":[{"id":"p-1","name":"Alice"}]}`))
+		case "/api/albums", "/api/tags", "/api/search/cities":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockImmich.Close()
+
+	cfg := config.Default()
+	cfg.Server.ProfilesFile = filepath.Join(t.TempDir(), "profiles.json")
+	cfg.Immich.URL = mockImmich.URL
+	cfg.Immich.APIKey = "test-api-key"
+
+	srv := New(cfg, "1.6.2")
+
+	// Initial GET /api/metadata populates cache
+	rec1 := httptest.NewRecorder()
+	srv.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/metadata", nil))
+	if rec1.Code != http.StatusOK || peopleHits.Load() != 1 {
+		t.Fatalf("expected 200 and 1 hit on initial GET /api/metadata, got code=%d hits=%d", rec1.Code, peopleHits.Load())
+	}
+
+	// Second GET /api/metadata uses cache (no new hit)
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/metadata", nil))
+	if rec2.Code != http.StatusOK || peopleHits.Load() != 1 {
+		t.Fatalf("expected cached metadata on second GET /api/metadata, got code=%d hits=%d", rec2.Code, peopleHits.Load())
+	}
+
+	// POST /api/metadata/refresh clears cache and re-fetches
+	rec3 := httptest.NewRecorder()
+	srv.ServeHTTP(rec3, httptest.NewRequest(http.MethodPost, "/api/metadata/refresh", nil))
+	if rec3.Code != http.StatusOK || peopleHits.Load() != 2 {
+		t.Fatalf("expected cache clear and 2 hits on POST /api/metadata/refresh, got code=%d hits=%d", rec3.Code, peopleHits.Load())
+	}
+}
+
+func TestProfileStoreSafety(t *testing.T) {
+	nestedDir := filepath.Join(t.TempDir(), "nested", "dir")
+	profilesPath := filepath.Join(nestedDir, "profiles.json")
+
+	cfg := config.Default()
+	cfg.Server.ProfilesFile = profilesPath
+	srv := New(cfg, "1.6.2")
+
+	// 1. Save with >50 history entries and nested dir creation
+	var histJSON bytes.Buffer
+	histJSON.WriteByte('[')
+	for i := 0; i < 60; i++ {
+		if i > 0 {
+			histJSON.WriteByte(',')
+		}
+		fmt.Fprintf(&histJSON, `{"label":"Edit %d","timestamp":"2026-11-17T10:00:00Z","snapshot":{}}`, i)
+	}
+	histJSON.WriteByte(']')
+	body := fmt.Sprintf(`{"name":"Capped History","filterJson":"{}","history":%s,"historyIndex":59}`, histJSON.String())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 saving profile to nested dir, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var saveResp struct {
+		Profile SearchProfile `json:"profile"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &saveResp); err != nil {
+		t.Fatalf("unmarshaling save response: %v", err)
+	}
+	if len(saveResp.Profile.History) != 50 || saveResp.Profile.HistoryIndex != 49 {
+		t.Fatalf("expected history capped to 50 and index clamped to 49, got len=%d idx=%d", len(saveResp.Profile.History), saveResp.Profile.HistoryIndex)
+	}
+
+	// 2. Delete profile atomically
+	reqDel := httptest.NewRequest(http.MethodDelete, "/api/profiles/"+saveResp.Profile.ID, nil)
+	recDel := httptest.NewRecorder()
+	srv.ServeHTTP(recDel, reqDel)
+	if recDel.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting profile, got %d", recDel.Code)
+	}
+
+	// 3. Corrupt profiles file must NOT be overwritten on Save
+	corruptData := []byte(`{corrupt json`)
+	if err := os.WriteFile(profilesPath, corruptData, 0644); err != nil {
+		t.Fatalf("writing corrupt file: %v", err)
+	}
+	if _, err := srv.profiles.Save(SearchProfile{Name: "Should Fail"}); err == nil {
+		t.Fatalf("expected Save to fail when existing profiles.json is corrupt")
+	}
+	after, err := os.ReadFile(profilesPath)
+	if err != nil || !bytes.Equal(after, corruptData) {
+		t.Fatalf("expected corrupt profiles.json to remain untouched, got %q (err=%v)", string(after), err)
 	}
 }

@@ -87,8 +87,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) handleRefreshMetadata(w http.ResponseWriter, r *http.Request) {
-	s.client.ClearCache()
+func (s *Server) handleGetMetadata(w http.ResponseWriter, r *http.Request) {
 	selectedUser := strings.TrimSpace(r.URL.Query().Get("user"))
 	if selectedUser == "all" {
 		selectedUser = ""
@@ -99,6 +98,11 @@ func (s *Server) handleRefreshMetadata(w http.ResponseWriter, r *http.Request) {
 		"warnings":      warnings,
 		"accountHealth": accountHealth,
 	})
+}
+
+func (s *Server) handleRefreshMetadata(w http.ResponseWriter, r *http.Request) {
+	s.client.ClearCache()
+	s.handleGetMetadata(w, r)
 }
 
 func (s *Server) collectMetadata(ctx context.Context, selectedUser string) (metadataPayload, []string, map[string]bool) {

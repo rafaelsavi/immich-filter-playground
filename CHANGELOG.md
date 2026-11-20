@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [1.7.0] - 2026-11-20
+
+### Added
+- **Keyboard Navigation & Chip Ergonomics**: Added `ArrowUp`/`ArrowDown`, `Escape`, `Backspace`, and safe `Enter` UUID selection for multi-select rule dropdowns, plus per-rule **Duplicate** (`⧉`) and **Clear** buttons.
+- **Enhanced Asset Lightbox**: Added Prev/Next navigation (`←`/`→` keys and header buttons), favorite/rating/archived/description display, and one-click filter chips for country, city, camera, people, and tags.
+- **Workspace & History Ergonomics**: Added session Undo/Redo for Custom Filter mode, collapsible Modification History panel, `Ctrl+S` save shortcut, dirty indicators (`• ` prefix and **Discard** button), `localStorage` theme persistence with cross-tab sync, and full URL state sync.
+
+### Fixed
+- **Filter Round-Trip & Date Bounds**: Fixed multi-operator field decompilation, same-operator array merging, stale `dateAfter`/`dateBefore` bounds on operator switch, and `rating` `0` preservation.
+- **Profile Persistence & Sync**: Added atomic profile writes, corrupt-file protection, 50-entry history capping, offline deletion/sync reconciliation, and fixed the permanently disabled Save Profile submit button.
+- **Metadata & Count Caching**: Added `GET /api/metadata` to preserve cache on account switches, 45s TTL caching for `CountAssets`, and fixed early pagination termination when pages have `< 1000` items.
+- **UI & Versioning**: Fixed unstyled `#unsaved-profile-dialog`, undefined CSS variables, dialog light-dismiss fallback, `vv` version prefix duplication, and Load More cap at 200.
+
 ## [1.6.2] - 2026-11-17
 
 ### Added

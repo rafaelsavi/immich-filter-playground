@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [1.8.1] - 2026-11-20
+
+### Changed
+- **Asset Count Limit**: Increased the `CountAssets` pagination cap from `5,000` to `1,000,000` assets.
+
 ## [1.8.0] - 2026-11-20
 
 ### Added

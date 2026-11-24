@@ -876,6 +876,31 @@ p, blockquote, li, .pretty-text {
 	color: var(--accent-color);
 }
 
+/* Raw (non-visual) filter fields kept verbatim */
+.rt-raw-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.3rem 0.55rem;
+	font-size: 0.76rem;
+	font-weight: 700;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	color: var(--violet-color);
+	background: var(--bg-subtle);
+	border: 1px dashed var(--violet-color);
+	border-radius: 0.38rem;
+}
+
+.rt-raw-input {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	font-size: 0.76rem;
+}
+
+.rt-raw-input.invalid {
+	border-color: #ef4444;
+	box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
 /* Selection & regrouping */
 .rt-select-node {
 	flex: 0 0 auto;

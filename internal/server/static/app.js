@@ -746,7 +746,41 @@ function renderGroupHTML(group, isRoot) {
 	`;
 }
 
+window.rtSetRawValue = function(ruleId, text, inputEl) {
+	const rule = findNode(state.ruleTree, ruleId);
+	if (!rule) return;
+	try {
+		rule.rawValue = JSON.parse(text);
+	} catch (err) {
+		if (inputEl) {
+			inputEl.classList.add('invalid');
+			inputEl.title = 'Invalid JSON: ' + err.message;
+		}
+		return;
+	}
+	if (inputEl) {
+		inputEl.classList.remove('invalid');
+		inputEl.title = '';
+	}
+	syncFromRuleTree();
+};
+
+function renderRawRuleHTML(rule) {
+	return `
+		<div class="rt-rule rt-raw${selectedRuleNodeIds.has(rule.id) ? ' rt-selected' : ''}" id="${rule.id}">
+			${renderSelectCheckboxHTML(rule.id, 'Select condition')}
+			<span class="rt-raw-badge" title="This filter field has no visual control; it is kept and sent as raw JSON">🧩 ${escapeHtml(rule.rawKey)}</span>
+			<div class="rt-value-box">
+				<input type="text" class="rt-text-input rt-raw-input" spellcheck="false" value="${escapeHtml(JSON.stringify(rule.rawValue))}" onchange="rtSetRawValue('${escapeHtml(rule.id)}', this.value, this)" aria-label="Raw JSON value for ${escapeHtml(rule.rawKey)}">
+			</div>
+			<button type="button" class="rt-btn-dup" onclick="rtDuplicateRule('${escapeHtml(rule.id)}')" title="Duplicate condition">⧉</button>
+			<button type="button" class="rt-btn-del" onclick="rtDeleteNode('${escapeHtml(rule.id)}')" title="Delete condition">✕</button>
+		</div>
+	`;
+}
+
 function renderRuleHTML(rule) {
+	if (rule.field === 'raw') return renderRawRuleHTML(rule);
 	let fieldSelect = `<select class="rt-select-field" onchange="rtChangeField('${rule.id}', this.value)">`;
 	for (const opt of FIELD_DEFINITIONS) {
 		fieldSelect += `<option value="${opt.value}" ${rule.field === opt.value ? 'selected' : ''}>${opt.label}</option>`;
@@ -901,6 +935,10 @@ function renderRuleHTML(rule) {
 // ==========================================================================
 
 function compileRuleToBranch(rule) {
+	if (rule.field === 'raw') {
+		if (!rule.rawKey) return null;
+		return { [rule.rawKey]: JSON.parse(JSON.stringify(rule.rawValue)) };
+	}
 	const branch = {};
 	const { field, operator, value } = rule;
 
@@ -1005,6 +1043,28 @@ function compileRuleToBranch(rule) {
 	return Object.keys(branch).length > 0 ? branch : null;
 }
 
+// Keys whose `any` operator is a disjunction over IDs.
+const ANY_LIST_KEYS = ['personIds', 'albumIds', 'tagIds'];
+
+function hasAnyList(branch, key) {
+	const v = branch && branch[key];
+	return !!v && typeof v === 'object' && Array.isArray(v.any) && v.any.length > 0;
+}
+
+function withoutAnyList(branch, key) {
+	const copy = { ...branch };
+	const inner = { ...copy[key] };
+	delete inner.any;
+	if (Object.keys(inner).length > 0) copy[key] = inner;
+	else delete copy[key];
+	return copy;
+}
+
+// Merges two branches that are ANDed together, key by key.
+//   all / none / notIn  -> union (AND of "contains all" is "contains every id")
+//   in                  -> intersection (value must be in both lists)
+// `any` lists cannot be merged in a single object (A-any AND B-any is not
+// any(A+B)); see mergeBranchesMulti for those.
 function mergeFilterBranches(left, right) {
 	const merged = { ...left };
 	for (const [key, value] of Object.entries(right)) {
@@ -1014,7 +1074,12 @@ function mergeFilterBranches(left, right) {
 			const combined = { ...existing };
 			for (const [op, opVal] of Object.entries(value)) {
 				if (Array.isArray(combined[op]) && Array.isArray(opVal)) {
-					combined[op] = Array.from(new Set([...combined[op], ...opVal]));
+					if (op === 'in') {
+						const allowed = new Set(opVal);
+						combined[op] = combined[op].filter(v => allowed.has(v));
+					} else {
+						combined[op] = Array.from(new Set([...combined[op], ...opVal]));
+					}
 				} else {
 					combined[op] = opVal;
 				}
@@ -1025,6 +1090,52 @@ function mergeFilterBranches(left, right) {
 		}
 	}
 	return merged;
+}
+
+// ANDs two branches and returns the result as a list of branches (a disjunction).
+// Two `any` lists on the same key are expanded into the cross product of
+// `all: [x, y]` pairs, which is exactly (x1 OR x2) AND (y1 OR y2).
+function mergeBranchesMulti(left, right) {
+	const key = ANY_LIST_KEYS.find(k => hasAnyList(left, k) && hasAnyList(right, k));
+	if (!key) return [mergeFilterBranches(left, right)];
+
+	const leftSet = new Set(left[key].any);
+	const rightSet = new Set(right[key].any);
+	if (leftSet.size === rightSet.size && [...leftSet].every(v => rightSet.has(v))) {
+		return mergeBranchesMulti(left, withoutAnyList(right, key));
+	}
+
+	const leftRest = withoutAnyList(left, key);
+	const rightRest = withoutAnyList(right, key);
+	const seen = new Set();
+	const results = [];
+	for (const x of left[key].any) {
+		for (const y of right[key].any) {
+			const pair = { [key]: { all: Array.from(new Set([x, y])) } };
+			for (const base of mergeBranchesMulti(leftRest, rightRest)) {
+				const merged = mergeFilterBranches(base, pair);
+				const sig = JSON.stringify(merged);
+				if (!seen.has(sig)) {
+					seen.add(sig);
+					results.push(merged);
+				}
+			}
+		}
+	}
+	return results;
+}
+
+// Cross-multiplies two disjunctions of branches under AND. An empty list means "no constraint".
+function crossBranchLists(listA, listB) {
+	if (listA.length === 0) return listB;
+	if (listB.length === 0) return listA;
+	const out = [];
+	for (const a of listA) {
+		for (const b of listB) {
+			out.push(...mergeBranchesMulti(a, b));
+		}
+	}
+	return out;
 }
 
 function compileOrGroupToBranches(group) {
@@ -1044,8 +1155,9 @@ function compileOrGroupToBranches(group) {
 					const direct = Object.assign({}, andRes);
 					delete direct.or;
 					for (const orBranch of andRes.or) {
-						const merged = mergeFilterBranches(direct, orBranch);
-						if (Object.keys(merged).length > 0) branches.push(merged);
+						for (const merged of mergeBranchesMulti(direct, orBranch)) {
+							if (Object.keys(merged).length > 0) branches.push(merged);
+						}
 					}
 				} else if (Object.keys(andRes).length > 0) {
 					branches.push(andRes);
@@ -1061,45 +1173,37 @@ function compileAndGroup(group) {
 	let root = {};
 	let orBranches = [];
 
+	// Merges `branch` into the shared top-level object. If that would require an
+	// OR (two `any` lists on one key), the expansion moves into orBranches.
+	const mergeIntoRoot = (branch) => {
+		const merged = mergeBranchesMulti(root, branch);
+		if (merged.length === 1) {
+			root = merged[0];
+		} else {
+			orBranches = crossBranchLists(orBranches, merged);
+			root = {};
+		}
+	};
+
 	for (const child of group.children) {
 		if (child.type === 'rule') {
 			const b = compileRuleToBranch(child);
-			if (b && Object.keys(b).length > 0) root = mergeFilterBranches(root, b);
+			if (b && Object.keys(b).length > 0) mergeIntoRoot(b);
 		} else if (child.type === 'group') {
 			const childCombiner = (child.combiner || 'AND').toUpperCase();
 			if (childCombiner === 'OR') {
 				const subBranches = compileOrGroupToBranches(child);
 				if (subBranches.length > 0) {
-					if (orBranches.length === 0) {
-						orBranches = subBranches;
-					} else {
-						const combined = [];
-						for (const b1 of orBranches) {
-							for (const b2 of subBranches) {
-								combined.push(mergeFilterBranches(b1, b2));
-							}
-						}
-						orBranches = combined;
-					}
+					orBranches = crossBranchLists(orBranches, subBranches);
 				}
 			} else {
 				const subAnd = compileAndGroup(child);
 				if (subAnd.or && subAnd.or.length > 0) {
-					if (orBranches.length === 0) {
-						orBranches = subAnd.or;
-					} else {
-						const combined = [];
-						for (const b1 of orBranches) {
-							for (const b2 of subAnd.or) {
-								combined.push(mergeFilterBranches(b1, b2));
-							}
-						}
-						orBranches = combined;
-					}
+					orBranches = crossBranchLists(orBranches, subAnd.or);
 					delete subAnd.or;
 				}
 				if (Object.keys(subAnd).length > 0) {
-					root = mergeFilterBranches(root, subAnd);
+					mergeIntoRoot(subAnd);
 				}
 			}
 		}
@@ -1122,8 +1226,48 @@ function compileGroupToAST(group) {
 	return compileAndGroup(group);
 }
 
+// Operators each visual field understands. A key using any other operator is kept
+// as a raw rule so "Apply to Tree" never silently drops part of the filter.
+const SUPPORTED_FILTER_OPS = {
+	personIds: ['all', 'any', 'none'],
+	albumIds: ['all', 'any', 'none'],
+	tagIds: ['all', 'any', 'none'],
+	country: ['eq', 'in', 'notIn'],
+	state: ['eq', 'in', 'notIn'],
+	city: ['eq', 'in', 'notIn'],
+	model: ['eq', 'in', 'notIn'],
+	make: ['eq', 'in', 'notIn'],
+	lensModel: ['eq', 'in', 'notIn'],
+	isFavorite: ['eq'],
+	isMotion: ['eq'],
+	hasPeople: ['eq'],
+	hasAlbums: ['eq'],
+	hasTags: ['eq'],
+	rating: ['eq', 'gte', 'lte'],
+	takenAt: ['gte', 'lte'],
+	description: ['like', 'notLike', 'eq', 'startsWith', 'endsWith'],
+	originalFileName: ['like', 'notLike', 'eq', 'startsWith', 'endsWith'],
+	ocr: ['matches']
+};
+
+function pushRawRule(key, val, children) {
+	children.push({
+		id: generateNodeId('r'),
+		type: 'rule',
+		field: 'raw',
+		rawKey: key,
+		rawValue: JSON.parse(JSON.stringify(val))
+	});
+}
+
 function parseFieldToRules(key, val, children) {
 	if (val === null || val === undefined) return;
+	const supported = SUPPORTED_FILTER_OPS[key];
+	if (supported && val && typeof val === 'object' && !Array.isArray(val) &&
+		Object.keys(val).some(op => !supported.includes(op))) {
+		pushRawRule(key, val, children);
+		return;
+	}
 	if (key === 'personIds' || key === 'albumIds' || key === 'tagIds') {
 		const field = key === 'personIds' ? 'people' : (key === 'albumIds' ? 'albums' : 'tags');
 		if (Array.isArray(val)) {
@@ -1160,12 +1304,22 @@ function parseFieldToRules(key, val, children) {
 		if (val === true || (typeof val === 'object' && val.eq === true)) {
 			children.push({ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: 'MOTION', value: 'MOTION' });
 		}
-	} else if (key === 'type') {
-		const t = typeof val === 'string' ? val : (val.in ? val.in[0] : (val.eq || 'IMAGE'));
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'media_type', operator: t, value: t });
-	} else if (key === 'visibility') {
-		const vis = typeof val === 'string' ? val : (val.in ? val.in[0] : (val.eq || 'timeline'));
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'visibility', operator: vis, value: vis });
+	} else if (key === 'type' || key === 'visibility') {
+		// Only a single value maps onto the visual rule; anything richer stays as raw JSON.
+		const field = key === 'type' ? 'media_type' : 'visibility';
+		let single = null;
+		if (typeof val === 'string') {
+			single = val;
+		} else if (val && typeof val === 'object') {
+			const keys = Object.keys(val);
+			if (keys.length === 1 && keys[0] === 'eq' && typeof val.eq === 'string') single = val.eq;
+			else if (keys.length === 1 && keys[0] === 'in' && Array.isArray(val.in) && val.in.length === 1) single = val.in[0];
+		}
+		if (single !== null) {
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: single, value: single });
+		} else {
+			pushRawRule(key, val, children);
+		}
 	} else if (key === 'rating') {
 		if (typeof val === 'number') {
 			children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'eq', value: val });
@@ -1210,6 +1364,9 @@ function parseFieldToRules(key, val, children) {
 		}
 	} else if (key === 'ocr') {
 		children.push({ id: generateNodeId('r'), type: 'rule', field: 'ocr', operator: 'matches', value: val.matches || '' });
+	} else if (key !== 'or') {
+		// Fields the visual editor has no control for (libraryId, checksum, ...) are kept verbatim.
+		pushRawRule(key, val, children);
 	}
 }
 
@@ -2370,6 +2527,7 @@ function getHistoryTreeNodes(tree) {
 }
 
 function getHistoryFieldLabel(field) {
+	if (field === 'raw') return 'Custom filter';
 	const definition = FIELD_DEFINITIONS.find(item => item.value === field);
 	return definition ? definition.label.replace(/^\S+\s*/, '') : String(field || 'Unknown field').replace(/_/g, ' ');
 }
@@ -2412,6 +2570,7 @@ function getHistoryRuleValue(rule, includeMetadata = false) {
 }
 
 function getHistoryRuleCondition(rule, includeMetadata = false) {
+	if (rule.field === 'raw') return `${rule.rawKey} = ${JSON.stringify(rule.rawValue)}`;
 	const value = getHistoryRuleValue(rule, includeMetadata);
 	const isSelfDescribing = ['favorite', 'has_people', 'has_albums', 'has_tags', 'media_type', 'visibility'].includes(rule.field);
 	if (!value && !isSelfDescribing) return '';
@@ -2474,7 +2633,7 @@ function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false)
 	});
 
 	if (added.length > 0 && removed.length > 0) {
-		const ruleSignature = r => JSON.stringify([r.field, r.operator, r.value, r.dateAfter || '', r.dateBefore || '']);
+		const ruleSignature = r => JSON.stringify([r.field, r.operator, r.value, r.dateAfter || '', r.dateBefore || '', r.rawKey || '', r.rawValue === undefined ? null : r.rawValue]);
 		const removedRemaining = [...removed];
 		const filteredAdded = [];
 		for (const r of added) {

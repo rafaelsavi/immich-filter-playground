@@ -1,4 +1,4 @@
-.PHONY: all build run test clean docker-build help
+.PHONY: all build run test test-web clean docker-build help
 
 BINARY_NAME=immich-filter-playground
 VERSION ?= $(shell grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
@@ -14,8 +14,12 @@ build: ## Build the standalone binary
 run: ## Run the development server
 	go run .
 
-test: ## Run unit tests
+test: ## Run unit tests (Go + frontend)
 	go test -v -race ./...
+	node --test "web_tests/*.test.js"
+
+test-web: ## Run frontend unit tests only (Node 20+)
+	node --test "web_tests/*.test.js"
 
 vet: ## Run Go static code analysis
 	go vet ./...

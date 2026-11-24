@@ -334,18 +334,58 @@ func (c *Client) FetchLocations(ctx context.Context, apiKey string) (LocationMet
 	return locs, nil
 }
 
-func ApplyDefaultConstraints(filter SearchFilter, includeVideos, includeArchived bool) SearchFilter {
-	if len(filter.Type.In) == 0 && filter.Type.Eq == "" && len(filter.Type.NotIn) == 0 && filter.Type.Ne == "" {
-		filter.Type = FilterAssetType{In: []AssetType{ImageType}}
-		if includeVideos {
-			filter.Type.In = append(filter.Type.In, VideoType)
-		}
+func typeUnset(t FilterAssetType) bool {
+	return len(t.In) == 0 && t.Eq == "" && len(t.NotIn) == 0 && t.Ne == ""
+}
+
+func visibilityUnset(v FilterAssetVisibility) bool {
+	return len(v.In) == 0 && v.Eq == "" && len(v.NotIn) == 0 && v.Ne == ""
+}
+
+func defaultTypeFilter(includeVideos bool) FilterAssetType {
+	f := FilterAssetType{In: []AssetType{ImageType}}
+	if includeVideos {
+		f.In = append(f.In, VideoType)
 	}
-	if len(filter.Visibility.In) == 0 && filter.Visibility.Eq == "" && len(filter.Visibility.NotIn) == 0 && filter.Visibility.Ne == "" {
-		filter.Visibility = FilterAssetVisibility{In: []AssetVisibility{Timeline}}
-		if includeArchived {
-			filter.Visibility.In = append(filter.Visibility.In, Archive)
+	return f
+}
+
+func defaultVisibilityFilter(includeArchived bool) FilterAssetVisibility {
+	f := FilterAssetVisibility{In: []AssetVisibility{Timeline}}
+	if includeArchived {
+		f.In = append(f.In, Archive)
+	}
+	return f
+}
+
+// ApplyDefaultConstraints injects the default media type and visibility
+// constraints wherever the user has not set one explicitly. When the filter has
+// OR branches, a top-level default would be ANDed onto every branch and could
+// silently cancel a branch that targets e.g. archived assets, so the defaults
+// are applied per branch instead. The caller's filter is never mutated.
+func ApplyDefaultConstraints(filter SearchFilter, includeVideos, includeArchived bool) SearchFilter {
+	hasBranches := filter.Or != nil && len(*filter.Or) > 0
+
+	if hasBranches {
+		branches := make([]SearchFilterBranch, len(*filter.Or))
+		copy(branches, *filter.Or)
+		for i := range branches {
+			if typeUnset(branches[i].Type) && typeUnset(filter.Type) {
+				branches[i].Type = defaultTypeFilter(includeVideos)
+			}
+			if visibilityUnset(branches[i].Visibility) && visibilityUnset(filter.Visibility) {
+				branches[i].Visibility = defaultVisibilityFilter(includeArchived)
+			}
 		}
+		filter.Or = &branches
+		return filter
+	}
+
+	if typeUnset(filter.Type) {
+		filter.Type = defaultTypeFilter(includeVideos)
+	}
+	if visibilityUnset(filter.Visibility) {
+		filter.Visibility = defaultVisibilityFilter(includeArchived)
 	}
 	return filter
 }

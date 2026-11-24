@@ -29,6 +29,9 @@ const state = {
 		lenses: []
 	},
 	lastAssets: [],
+	lastTotal: 0,
+	lastTotalExact: true,
+	countPending: false,
 	lastRequestBodyJson: '{}',
 	lightboxIndex: -1,
 	defaults: {
@@ -1407,6 +1410,7 @@ async function runLiveSearch(filterJsonStr) {
 		activeSearchController.abort();
 	}
 	activeSearchController = new AbortController();
+	const controller = activeSearchController;
 	const thisSeq = ++searchSequenceId;
 
 	const countBadge = document.getElementById('results-count-badge');
@@ -1415,21 +1419,23 @@ async function runLiveSearch(filterJsonStr) {
 	const editorEl = document.getElementById('filter-json-editor');
 	const rawFilter = filterJsonStr !== undefined ? filterJsonStr : (editorEl ? editorEl.value : '{}');
 
+	const payload = {
+		filterJson: rawFilter,
+		user: state.selectedUser,
+		limit: state.sampleSize,
+		searchMode: state.searchMode,
+		orderByField: state.orderByField,
+		orderByDirection: state.orderByDirection,
+		includeVideos: state.includeVideos,
+		includeArchived: state.includeArchived
+	};
+
 	try {
 		const resp = await fetch('/api/search', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			signal: activeSearchController.signal,
-			body: JSON.stringify({
-				filterJson: rawFilter,
-				user: state.selectedUser,
-				limit: state.sampleSize,
-				searchMode: state.searchMode,
-				orderByField: state.orderByField,
-				orderByDirection: state.orderByDirection,
-				includeVideos: state.includeVideos,
-				includeArchived: state.includeArchived
-			})
+			signal: controller.signal,
+			body: JSON.stringify({ ...payload, skipCount: true })
 		});
 
 		const data = await resp.json();
@@ -1438,6 +1444,10 @@ async function runLiveSearch(filterJsonStr) {
 			return;
 		}
 		renderSearchResults(data);
+		// Thumbnails are already on screen; the exact total is fetched separately.
+		if (data.countPending && !data.error) {
+			fetchSearchCount(payload, thisSeq, controller);
+		}
 	} catch (err) {
 		// If aborted or superseded by a newer search, drop silent without error
 		if (thisSeq !== searchSequenceId || err.name === 'AbortError') {
@@ -1445,6 +1455,69 @@ async function runLiveSearch(filterJsonStr) {
 		}
 		renderSearchResults({ error: err.message || 'Network request failed' });
 	}
+}
+
+function updateCountBadge() {
+	const countBadge = document.getElementById('results-count-badge');
+	if (!countBadge) return;
+	const shown = state.lastAssets.length;
+	const total = state.lastTotal;
+	const exact = state.lastTotalExact;
+	if (shown === 0) {
+		countBadge.textContent = '0 matching';
+	} else if (state.countPending) {
+		countBadge.textContent = `Showing ${shown} · counting matches…`;
+	} else if (total > shown) {
+		countBadge.textContent = `${total.toLocaleString()}${exact ? '' : '+'} matching (showing ${shown})`;
+	} else if (!exact) {
+		countBadge.textContent = `${total.toLocaleString()}+ matching (showing ${shown})`;
+	} else {
+		countBadge.textContent = `All ${shown.toLocaleString()} matching shown`;
+	}
+}
+
+function updateLoadMore() {
+	const loadMoreWrap = document.getElementById('load-more-wrap');
+	if (!loadMoreWrap) return;
+	const shown = state.lastAssets.length;
+	// While the count is pending, assume more exists whenever the page came back full.
+	const hasMore = state.countPending
+		? shown >= state.sampleSize
+		: (state.lastTotal > shown || !state.lastTotalExact);
+	loadMoreWrap.hidden = shown === 0 || !(hasMore && state.sampleSize < 200);
+	const loadMoreBtn = document.getElementById('btn-load-more');
+	if (loadMoreBtn) {
+		let nextSize = 200;
+		if (state.sampleSize < 48) nextSize = 48;
+		else if (state.sampleSize < 96) nextSize = 96;
+		else if (state.sampleSize < 144) nextSize = 144;
+		loadMoreBtn.textContent = `Load More Assets (show ${nextSize})`;
+	}
+}
+
+async function fetchSearchCount(payload, seq, controller) {
+	try {
+		const resp = await fetch('/api/search/count', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			signal: controller.signal,
+			body: JSON.stringify(payload)
+		});
+		const data = await resp.json();
+		if (seq !== searchSequenceId) return;
+		if (data.error) {
+			state.lastTotalExact = false;
+		} else {
+			state.lastTotal = data.total || 0;
+			state.lastTotalExact = data.totalExact !== false;
+		}
+	} catch (err) {
+		if (seq !== searchSequenceId || err.name === 'AbortError') return;
+		state.lastTotalExact = false;
+	}
+	state.countPending = false;
+	updateCountBadge();
+	updateLoadMore();
 }
 
 function renderSearchResults(data) {
@@ -1477,18 +1550,10 @@ function renderSearchResults(data) {
 
 	const total = data.total || 0;
 	const exact = data.totalExact !== false;
-
-	if (countBadge) {
-		if (assets.length === 0) {
-			countBadge.textContent = '0 matching';
-		} else if (total > assets.length) {
-			countBadge.textContent = `${total.toLocaleString()}${exact ? '' : '+'} matching (showing ${assets.length})`;
-		} else if (!exact) {
-			countBadge.textContent = `${total.toLocaleString()}+ matching (showing ${assets.length})`;
-		} else {
-			countBadge.textContent = `All ${assets.length.toLocaleString()} matching shown`;
-		}
-	}
+	state.lastTotal = total;
+	state.lastTotalExact = exact;
+	state.countPending = !!data.countPending;
+	updateCountBadge();
 
 	if (assets.length === 0) {
 		if (emptyEl) emptyEl.hidden = false;
@@ -1498,17 +1563,7 @@ function renderSearchResults(data) {
 	}
 
 	if (emptyEl) emptyEl.hidden = true;
-	if (loadMoreWrap) {
-		loadMoreWrap.hidden = !((total > assets.length || !exact) && state.sampleSize < 200);
-		const loadMoreBtn = document.getElementById('btn-load-more');
-		if (loadMoreBtn) {
-			let nextSize = 200;
-			if (state.sampleSize < 48) nextSize = 48;
-			else if (state.sampleSize < 96) nextSize = 96;
-			else if (state.sampleSize < 144) nextSize = 144;
-			loadMoreBtn.textContent = `Load More Assets (show ${nextSize})`;
-		}
-	}
+	updateLoadMore();
 
 	if (gridEl) {
 		gridEl.innerHTML = assets.map((item, idx) => {

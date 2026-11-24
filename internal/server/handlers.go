@@ -285,6 +285,8 @@ type searchRequest struct {
 	OrderByDirection string `json:"orderByDirection"`
 	IncludeVideos    *bool  `json:"includeVideos"`
 	IncludeArchived  *bool  `json:"includeArchived"`
+	// SkipCount omits the (slow) total count; fetch it via POST /api/search/count.
+	SkipCount bool `json:"skipCount"`
 }
 
 type assetItem struct {
@@ -317,6 +319,7 @@ type assetItem struct {
 type searchResponse struct {
 	Total            int          `json:"total"`
 	TotalExact       bool         `json:"totalExact"`
+	CountPending     bool         `json:"countPending,omitempty"`
 	Limit            int          `json:"limit"`
 	SearchMode       string       `json:"searchMode"`
 	NormalizedFilter string       `json:"normalizedFilter"`
@@ -331,42 +334,45 @@ type userFilterQuery struct {
 	filter immich.SearchFilter
 }
 
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.IsConfigured() {
-		writeJSON(w, http.StatusOK, searchResponse{
-			Error: "Immich URL or accounts are not configured. Please check config.yaml or environment variables.",
-		})
-		return
+// resolvedSearch is a normalized, validated search request shared by the
+// search and count endpoints.
+type resolvedSearch struct {
+	limit            int
+	searchMode       string
+	includeVideos    bool
+	includeArchived  bool
+	normalizedFilter string
+	queries          []userFilterQuery
+	orderBy          *immich.SearchOrder
+}
+
+// resolveSearch normalizes a searchRequest: clamps the limit, resolves the mode
+// and media toggles against config defaults, parses the filter JSON and picks
+// which accounts to query. A non-empty error message means the request is invalid
+// (the partially filled result still carries the limit and mode).
+func (s *Server) resolveSearch(req searchRequest) (resolvedSearch, string) {
+	var rs resolvedSearch
+
+	rs.limit = req.Limit
+	if rs.limit <= 0 {
+		rs.limit = s.cfg.Defaults.SampleSize
+	}
+	if rs.limit > 250 {
+		rs.limit = 250
 	}
 
-	var req searchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, searchResponse{
-			Error: fmt.Sprintf("Invalid search request payload: %v", err),
-		})
-		return
+	rs.searchMode = strings.ToLower(strings.TrimSpace(req.SearchMode))
+	if rs.searchMode != "metadata" && rs.searchMode != "random" {
+		rs.searchMode = s.cfg.Defaults.SearchMode
 	}
 
-	limit := req.Limit
-	if limit <= 0 {
-		limit = s.cfg.Defaults.SampleSize
-	}
-	if limit > 250 {
-		limit = 250
-	}
-
-	searchMode := strings.ToLower(strings.TrimSpace(req.SearchMode))
-	if searchMode != "metadata" && searchMode != "random" {
-		searchMode = s.cfg.Defaults.SearchMode
-	}
-
-	includeVideos := s.cfg.Defaults.IncludeVideos
+	rs.includeVideos = s.cfg.Defaults.IncludeVideos
 	if req.IncludeVideos != nil {
-		includeVideos = *req.IncludeVideos
+		rs.includeVideos = *req.IncludeVideos
 	}
-	includeArchived := s.cfg.Defaults.IncludeArchived
+	rs.includeArchived = s.cfg.Defaults.IncludeArchived
 	if req.IncludeArchived != nil {
-		includeArchived = *req.IncludeArchived
+		rs.includeArchived = *req.IncludeArchived
 	}
 
 	selectedUser := strings.TrimSpace(req.User)
@@ -382,28 +388,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	userFilters, err := immich.ParseUserFilters(rawFilter, knownUsers)
 	if err != nil {
-		writeJSON(w, http.StatusOK, searchResponse{
-			Limit:      limit,
-			SearchMode: searchMode,
-			Error:      fmt.Sprintf("Invalid Filter JSON: %v", err),
-		})
-		return
+		return rs, fmt.Sprintf("Invalid Filter JSON: %v", err)
 	}
 
 	var prettyBuf bytes.Buffer
-	normalizedFilter := rawFilter
+	rs.normalizedFilter = rawFilter
 	if json.Indent(&prettyBuf, []byte(rawFilter), "", "  ") == nil {
-		normalizedFilter = prettyBuf.String()
+		rs.normalizedFilter = prettyBuf.String()
 	}
 
 	// Determine which user queries to execute
-	var queries []userFilterQuery
+	queries := &rs.queries
 	if selectedUser != "" {
 		if f, ok := userFilters.ForUser(selectedUser); ok {
-			queries = append(queries, userFilterQuery{user: selectedUser, filter: f})
+			*queries = append(*queries, userFilterQuery{user: selectedUser, filter: f})
 		} else {
 			for _, f := range userFilters {
-				queries = append(queries, userFilterQuery{user: selectedUser, filter: f})
+				*queries = append(*queries, userFilterQuery{user: selectedUser, filter: f})
 				break
 			}
 		}
@@ -418,14 +419,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if hasSpecificUsers {
 			for u, f := range userFilters {
 				if u != "" && u != "*" && u != "default" {
-					queries = append(queries, userFilterQuery{user: u, filter: f})
+					*queries = append(*queries, userFilterQuery{user: u, filter: f})
 				}
 			}
-			sort.Slice(queries, func(i, j int) bool { return queries[i].user < queries[j].user })
+			sort.Slice(*queries, func(i, j int) bool { return (*queries)[i].user < (*queries)[j].user })
 		} else if len(knownUsers) > 1 {
 			for _, u := range knownUsers {
 				if f, ok := userFilters.ForUser(u); ok {
-					queries = append(queries, userFilterQuery{user: u, filter: f})
+					*queries = append(*queries, userFilterQuery{user: u, filter: f})
 				}
 			}
 		} else {
@@ -434,18 +435,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				user = knownUsers[0]
 			}
 			for _, f := range userFilters {
-				queries = append(queries, userFilterQuery{user: user, filter: f})
+				*queries = append(*queries, userFilterQuery{user: user, filter: f})
 				break
 			}
 		}
 	}
 
-	if len(queries) == 0 {
-		queries = append(queries, userFilterQuery{user: "", filter: immich.SearchFilter{}})
+	if len(rs.queries) == 0 {
+		rs.queries = append(rs.queries, userFilterQuery{user: "", filter: immich.SearchFilter{}})
 	}
 
-	var orderBy *immich.SearchOrder
-	if searchMode == "metadata" {
+	if rs.searchMode == "metadata" {
 		field := "localDateTime"
 		if req.OrderByField != "" {
 			field = normalizeOrderByField(req.OrderByField)
@@ -454,8 +454,97 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(req.OrderByDirection) == "asc" {
 			dir = immich.Asc
 		}
-		orderBy = &immich.SearchOrder{Field: field, Direction: dir}
+		rs.orderBy = &immich.SearchOrder{Field: field, Direction: dir}
 	}
+
+	return rs, ""
+}
+
+// countQueries counts matching assets across all queried accounts in parallel.
+func (s *Server) countQueries(ctx context.Context, rs resolvedSearch) (int, bool) {
+	var g errgroup.Group
+	var mu sync.Mutex
+	total := 0
+	exact := true
+
+	for _, q := range rs.queries {
+		query := q
+		apiKey := s.cfg.APIKeyForUser(query.user)
+		g.Go(func() error {
+			c, isExact, err := s.client.CountAssets(ctx, apiKey, query.filter, 1000000, rs.includeVideos, rs.includeArchived)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				exact = false
+				return nil
+			}
+			total += c
+			if !isExact {
+				exact = false
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return total, exact
+}
+
+func (s *Server) decodeSearchRequest(w http.ResponseWriter, r *http.Request) (searchRequest, bool) {
+	var req searchRequest
+	if !s.cfg.IsConfigured() {
+		writeJSON(w, http.StatusOK, searchResponse{
+			Error: "Immich URL or accounts are not configured. Please check config.yaml or environment variables.",
+		})
+		return req, false
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, searchResponse{
+			Error: fmt.Sprintf("Invalid search request payload: %v", err),
+		})
+		return req, false
+	}
+	return req, true
+}
+
+// handleSearchCount returns only the total number of matching assets. The
+// frontend calls it separately so thumbnails can render without waiting for the
+// (potentially long) paginated count.
+func (s *Server) handleSearchCount(w http.ResponseWriter, r *http.Request) {
+	req, ok := s.decodeSearchRequest(w, r)
+	if !ok {
+		return
+	}
+	rs, errMsg := s.resolveSearch(req)
+	if errMsg != "" {
+		writeJSON(w, http.StatusOK, searchResponse{Limit: rs.limit, SearchMode: rs.searchMode, Error: errMsg})
+		return
+	}
+	total, exact := s.countQueries(r.Context(), rs)
+	writeJSON(w, http.StatusOK, searchResponse{
+		Total:      total,
+		TotalExact: exact,
+		Limit:      rs.limit,
+		SearchMode: rs.searchMode,
+	})
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	req, ok := s.decodeSearchRequest(w, r)
+	if !ok {
+		return
+	}
+
+	rs, errMsg := s.resolveSearch(req)
+	if errMsg != "" {
+		writeJSON(w, http.StatusOK, searchResponse{
+			Limit:      rs.limit,
+			SearchMode: rs.searchMode,
+			Error:      errMsg,
+		})
+		return
+	}
+	limit, searchMode, queries, orderBy := rs.limit, rs.searchMode, rs.queries, rs.orderBy
+	includeVideos, includeArchived := rs.includeVideos, rs.includeArchived
 
 	// Build representative request body JSON for display
 	repFilter := immich.ApplyDefaultConstraints(queries[0].filter, includeVideos, includeArchived)
@@ -473,10 +562,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	userLists := make([][]assetItem, len(queries))
 	var searchErrors []string
 
-	var countG errgroup.Group
-	var countMu sync.Mutex
+	// Unless the client asked to count separately, count in parallel with the search.
+	var countWG sync.WaitGroup
 	totalMatching := 0
 	isExactCount := true
+	if !req.SkipCount {
+		countWG.Add(1)
+		go func() {
+			defer countWG.Done()
+			totalMatching, isExactCount = s.countQueries(r.Context(), rs)
+		}()
+	}
 
 	for idx, q := range queries {
 		i := idx
@@ -498,25 +594,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			userLists[i] = items
 			return nil
 		})
-
-		countG.Go(func() error {
-			c, exact, err := s.client.CountAssets(r.Context(), apiKey, query.filter, 1000000, includeVideos, includeArchived)
-			countMu.Lock()
-			defer countMu.Unlock()
-			if err != nil {
-				isExactCount = false
-				return nil
-			}
-			totalMatching += c
-			if !exact {
-				isExactCount = false
-			}
-			return nil
-		})
 	}
 
 	_ = g.Wait()
-	_ = countG.Wait()
+	countWG.Wait()
 
 	var merged []assetItem
 	if searchMode == "metadata" && len(queries) > 1 {
@@ -532,17 +613,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	errMsg := ""
+	errMsg = ""
 	if len(searchErrors) > 0 && len(merged) == 0 {
 		errMsg = strings.Join(searchErrors, " | ")
 	}
 
 	writeJSON(w, http.StatusOK, searchResponse{
 		Total:            totalMatching,
-		TotalExact:       isExactCount,
+		TotalExact:       isExactCount && !req.SkipCount,
+		CountPending:     req.SkipCount,
 		Limit:            limit,
 		SearchMode:       searchMode,
-		NormalizedFilter: normalizedFilter,
+		NormalizedFilter: rs.normalizedFilter,
 		RequestBodyJSON:  string(reqBodyBytes),
 		Assets:           merged,
 		Error:            errMsg,

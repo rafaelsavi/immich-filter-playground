@@ -62,6 +62,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/metadata", s.handleGetMetadata)
 	s.mux.HandleFunc("POST /api/metadata/refresh", s.handleRefreshMetadata)
 	s.mux.HandleFunc("POST /api/search", s.handleSearch)
+	s.mux.HandleFunc("POST /api/search/count", s.handleSearchCount)
 	s.mux.HandleFunc("GET /api/media/{kind}/{id}", s.handleMediaProxy)
 
 	// Search Profiles

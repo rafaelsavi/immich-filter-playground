@@ -3844,8 +3844,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			const [field, dir] = sortSelect.value.split(':');
 			state.orderByField = field || 'localDateTime';
 			state.orderByDirection = dir || 'desc';
-			recordProfileHistory();
-			runLiveSearch();
+			syncFromRuleTree({ skipFilterEditor: true });
 		});
 	}
 
@@ -3854,8 +3853,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (vidToggle) {
 		vidToggle.addEventListener('change', () => {
 			state.includeVideos = vidToggle.checked;
-			recordProfileHistory();
-			runLiveSearch();
+			syncFromRuleTree({ skipFilterEditor: true });
 		});
 	}
 
@@ -3863,8 +3861,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (archToggle) {
 		archToggle.addEventListener('change', () => {
 			state.includeArchived = archToggle.checked;
-			recordProfileHistory();
-			runLiveSearch();
+			syncFromRuleTree({ skipFilterEditor: true });
 		});
 	}
 
@@ -3873,8 +3870,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		btn.addEventListener('click', () => {
 			state.sampleSize = parseInt(btn.dataset.limit, 10) || 24;
 			syncToolbarControls();
-			recordProfileHistory();
-			runLiveSearch();
+			syncFromRuleTree({ skipFilterEditor: true });
 		});
 	});
 
@@ -3887,7 +3883,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			else if (state.sampleSize < 144) state.sampleSize = 144;
 			else state.sampleSize = 200;
 			syncToolbarControls();
-			runLiveSearch();
+			syncFromRuleTree({ skipFilterEditor: true });
 		});
 	}
 });

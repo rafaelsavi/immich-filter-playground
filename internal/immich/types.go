@@ -171,6 +171,7 @@ type Asset struct {
 	OriginalFileName string           `json:"originalFileName"`
 	OriginalMimeType string           `json:"originalMimeType"`
 	LocalDateTime    FlexibleTime     `json:"localDateTime"`
+	FileCreatedAt    FlexibleTime     `json:"fileCreatedAt"`
 	IsFavorite       bool             `json:"isFavorite"`
 	IsArchived       bool             `json:"isArchived"`
 	IsTrashed        bool             `json:"isTrashed"`

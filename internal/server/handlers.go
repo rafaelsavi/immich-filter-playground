@@ -311,6 +311,7 @@ type assetItem struct {
 	Description  string   `json:"description,omitempty"`
 	Width        int      `json:"width,omitempty"`
 	Height       int      `json:"height,omitempty"`
+	sortKey      float64
 }
 
 type searchResponse struct {
@@ -517,7 +518,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	_ = g.Wait()
 	_ = countG.Wait()
 
-	merged := interleaveUserAssetLists(userLists, limit)
+	var merged []assetItem
+	if searchMode == "metadata" && len(queries) > 1 {
+		// Preserve the requested ordering across accounts instead of round-robin.
+		merged = mergeSortedUserAssetLists(userLists, limit, orderBy == nil || orderBy.Direction != immich.Asc)
+	} else {
+		merged = interleaveUserAssetLists(userLists, limit)
+	}
 	if totalMatching < len(merged) {
 		totalMatching = len(merged)
 		if len(merged) > 0 {
@@ -585,6 +592,10 @@ func (s *Server) executeUserSearch(
 	}
 
 	externalBase := s.cfg.ExternalURL()
+	sortField := ""
+	if orderBy != nil {
+		sortField = orderBy.Field
+	}
 	out := make([]assetItem, 0, len(assets))
 	seen := make(map[string]bool, len(assets))
 
@@ -653,6 +664,7 @@ func (s *Server) executeUserSearch(
 			Description:  a.ExifInfo.Description,
 			Width:        a.ExifInfo.ExifImageWidth,
 			Height:       a.ExifInfo.ExifImageHeight,
+			sortKey:      assetSortKey(sortField, a),
 		})
 	}
 
@@ -724,6 +736,58 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	if err := s.client.ProxyAssetMedia(r.Context(), apiKey, id, mediaType, sizeParam, w, r); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 	}
+}
+
+// assetSortKey returns the numeric value an asset is ordered by for the given
+// Immich orderBy field, so results from several accounts can be merged in order.
+func assetSortKey(field string, a immich.Asset) float64 {
+	switch field {
+	case "fileCreatedAt":
+		if !a.FileCreatedAt.IsZero() {
+			return float64(a.FileCreatedAt.Time().UnixMilli())
+		}
+	case "rating":
+		return float64(a.ExifInfo.Rating)
+	case "fileSizeInBytes":
+		return float64(a.ExifInfo.FileSizeInByte)
+	default:
+		if !a.LocalDateTime.IsZero() {
+			return float64(a.LocalDateTime.Time().UnixMilli())
+		}
+		if !a.ExifInfo.DateTimeOriginal.IsZero() {
+			return float64(a.ExifInfo.DateTimeOriginal.Time().UnixMilli())
+		}
+	}
+	return 0
+}
+
+// mergeSortedUserAssetLists merges per-account result lists into one list
+// ordered by sortKey (descending when desc is true), de-duplicating by ID.
+// The sort is stable, so equal keys keep account order.
+func mergeSortedUserAssetLists(groups [][]assetItem, limit int, desc bool) []assetItem {
+	seen := make(map[string]bool)
+	var all []assetItem
+	for _, g := range groups {
+		for _, item := range g {
+			if !seen[item.ID] {
+				seen[item.ID] = true
+				all = append(all, item)
+			}
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		if desc {
+			return all[i].sortKey > all[j].sortKey
+		}
+		return all[i].sortKey < all[j].sortKey
+	})
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	if all == nil {
+		return []assetItem{}
+	}
+	return all
 }
 
 func interleaveUserAssetLists(groups [][]assetItem, limit int) []assetItem {

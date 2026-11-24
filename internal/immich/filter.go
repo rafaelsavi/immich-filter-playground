@@ -77,6 +77,20 @@ func parseFlexibleTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse date string: %q", s)
 }
 
+// parseFlexibleTimeEnd parses like parseFlexibleTime, but a date-only value
+// ("2006-01-02") resolves to the last millisecond of that day, so inclusive
+// upper bounds (lte) and exclusive lower bounds (gt) cover the whole day.
+func parseFlexibleTimeEnd(s string) (time.Time, error) {
+	t, err := parseFlexibleTime(s)
+	if err != nil {
+		return t, err
+	}
+	if _, dateErr := time.Parse("2006-01-02", strings.TrimSpace(s)); dateErr == nil {
+		t = t.Add(24*time.Hour - time.Millisecond)
+	}
+	return t, nil
+}
+
 func (d *DateFilter) UnmarshalJSON(data []byte) error {
 	var strVal string
 	if err := json.Unmarshal(data, &strVal); err == nil {
@@ -100,15 +114,17 @@ func (d *DateFilter) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	parseVal := func(v any) (time.Time, error) {
+	parseWith := func(v any, parse func(string) (time.Time, error)) (time.Time, error) {
 		if v == nil {
 			return time.Time{}, nil
 		}
 		if s, ok := v.(string); ok && s != "" {
-			return parseFlexibleTime(s)
+			return parse(s)
 		}
 		return time.Time{}, fmt.Errorf("invalid date value: %v", v)
 	}
+	parseVal := func(v any) (time.Time, error) { return parseWith(v, parseFlexibleTime) }
+	parseValEnd := func(v any) (time.Time, error) { return parseWith(v, parseFlexibleTimeEnd) }
 
 	if raw.Eq != nil {
 		t, err := parseVal(raw.Eq)
@@ -118,7 +134,7 @@ func (d *DateFilter) UnmarshalJSON(data []byte) error {
 		d.Eq = t
 	}
 	if raw.Gt != nil {
-		t, err := parseVal(raw.Gt)
+		t, err := parseValEnd(raw.Gt)
 		if err != nil {
 			return err
 		}
@@ -139,7 +155,7 @@ func (d *DateFilter) UnmarshalJSON(data []byte) error {
 		d.Lt = t
 	}
 	if raw.Lte != nil {
-		t, err := parseVal(raw.Lte)
+		t, err := parseValEnd(raw.Lte)
 		if err != nil {
 			return err
 		}
@@ -250,7 +266,7 @@ func (s *SearchFilter) UnmarshalJSON(data []byte) error {
 	}
 	if raw.TakenBefore != nil {
 		if str, ok := raw.TakenBefore.(string); ok && str != "" {
-			if t, err := parseFlexibleTime(str); err == nil {
+			if t, err := parseFlexibleTimeEnd(str); err == nil {
 				s.TakenAt.Lte = t
 			}
 		}

@@ -2601,6 +2601,7 @@ function isLocalPendingProfileNewer(localProfile, serverProfile) {
 function renderProfilesDropdown() {
 	const selectEl = document.getElementById('profile-select');
 	const deleteBtn = document.getElementById('btn-delete-profile');
+	const exportBtn = document.getElementById('btn-export-profiles');
 	if (!selectEl) return;
 
 	selectEl.innerHTML = '<option value="">Custom Filter</option>';
@@ -2616,7 +2617,94 @@ function renderProfilesDropdown() {
 	if (deleteBtn) {
 		deleteBtn.hidden = !(state.activeProfileId && state.activeProfileId.startsWith('prof_'));
 	}
+	if (exportBtn) {
+		exportBtn.hidden = state.profiles.length === 0;
+	}
 	updateProfileActionLabels();
+}
+
+function handleExportProfiles() {
+	if (!state.profiles.length) return;
+	const clean = state.profiles.map(p => {
+		const copy = { ...p };
+		delete copy.serverBacked;
+		delete copy.pendingSync;
+		delete copy.deletePending;
+		return copy;
+	});
+	const blob = new Blob([JSON.stringify(clean, null, 2)], { type: 'application/json' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = 'immich-filter-profiles.json';
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+	setProfileHistoryStatus(`Exported ${clean.length} profile(s).`);
+}
+
+async function handleImportProfilesFile(file) {
+	if (!file) return;
+	let parsed;
+	try {
+		parsed = JSON.parse(await file.text());
+	} catch (err) {
+		setProfileHistoryStatus(`Could not parse profiles file: ${err.message}`, true);
+		return;
+	}
+	const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.profiles) ? parsed.profiles : null);
+	if (!list || list.length === 0) {
+		setProfileHistoryStatus('Selected file does not contain any profiles.', true);
+		return;
+	}
+	const valid = list.filter(p => p && typeof p === 'object' && typeof p.name === 'string' && p.name.trim() !== '');
+	if (valid.length === 0) {
+		setProfileHistoryStatus('No valid profiles (each entry needs a name).', true);
+		return;
+	}
+
+	let importedCount = valid.length;
+	let savedToServer = false;
+	try {
+		const resp = await fetch('/api/profiles/import', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ profiles: valid })
+		});
+		if (!resp.ok) {
+			const errData = await resp.json().catch(() => ({}));
+			throw new Error(errData.error || `Import failed (${resp.status})`);
+		}
+		const data = await resp.json();
+		if (Array.isArray(data.profiles)) {
+			state.profiles = data.profiles.map(p => ({ ...p, serverBacked: true }));
+			importedCount = data.imported || valid.length;
+			savedToServer = true;
+		}
+	} catch (err) {
+		console.warn('Server profile import failed, saving locally:', err);
+		const map = new Map(state.profiles.map(p => [p.id, p]));
+		const nowIso = new Date().toISOString();
+		valid.forEach((p, idx) => {
+			const id = (p.id && String(p.id).trim()) || ('prof_' + (Date.now() + idx));
+			map.set(id, { ...p, id, name: p.name.trim(), updatedAt: p.updatedAt || nowIso, pendingSync: true });
+		});
+		state.profiles = Array.from(map.values());
+	}
+
+	saveProfilesToLocalStorage(state.profiles);
+	savedProfileSnapshots.clear();
+	for (const p of state.profiles) {
+		savedProfileSnapshots.set(p.id, JSON.stringify(p));
+	}
+	renderProfilesDropdown();
+	setProfileHistoryStatus(
+		savedToServer
+			? `Imported ${importedCount} profile(s) to server storage.`
+			: `Imported ${importedCount} profile(s) locally (server sync pending).`,
+		!savedToServer
+	);
 }
 
 function updateProfileActionLabels() {
@@ -3853,6 +3941,22 @@ document.addEventListener('DOMContentLoaded', () => {
 	const copyProfileBtn = document.getElementById('btn-copy-profile');
 	if (copyProfileBtn) {
 		copyProfileBtn.addEventListener('click', () => openSaveProfileModal(true));
+	}
+
+	const exportProfilesBtn = document.getElementById('btn-export-profiles');
+	if (exportProfilesBtn) {
+		exportProfilesBtn.addEventListener('click', handleExportProfiles);
+	}
+
+	const importProfilesBtn = document.getElementById('btn-import-profiles');
+	const importProfilesInput = document.getElementById('import-profiles-input');
+	if (importProfilesBtn && importProfilesInput) {
+		importProfilesBtn.addEventListener('click', () => importProfilesInput.click());
+		importProfilesInput.addEventListener('change', async () => {
+			const file = importProfilesInput.files && importProfilesInput.files[0];
+			importProfilesInput.value = '';
+			if (file) await handleImportProfilesFile(file);
+		});
 	}
 
 	const deleteProfileBtn = document.getElementById('btn-delete-profile');

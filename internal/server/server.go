@@ -68,6 +68,7 @@ func (s *Server) routes() {
 	// Search Profiles
 	s.mux.HandleFunc("GET /api/profiles", s.handleGetProfiles)
 	s.mux.HandleFunc("POST /api/profiles", s.handleSaveProfile)
+	s.mux.HandleFunc("POST /api/profiles/import", s.handleImportProfiles)
 	s.mux.HandleFunc("DELETE /api/profiles/{id}", s.handleDeleteProfile)
 
 	// Serve static frontend files (prefer local disk in dev if present, otherwise embedded FS)

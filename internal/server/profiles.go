@@ -116,44 +116,13 @@ func (ps *profileStore) Save(p SearchProfile) (SearchProfile, error) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	var profiles []SearchProfile
-	data, err := os.ReadFile(ps.filePath)
+	profiles, err := ps.readAllLocked()
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return p, fmt.Errorf("reading existing profiles: %w", err)
-		}
-	} else if len(bytes.TrimSpace(data)) > 0 {
-		if err := json.Unmarshal(data, &profiles); err != nil {
-			return p, fmt.Errorf("parsing existing profiles: %w", err)
-		}
+		return p, err
 	}
 
 	now := time.Now().UTC()
-	if strings.TrimSpace(p.ID) == "" {
-		p.ID = fmt.Sprintf("prof_%d", now.UnixNano())
-		p.CreatedAt = now
-	}
-	p.UpdatedAt = now
-
-	found := false
-	for i, existing := range profiles {
-		if existing.ID == p.ID {
-			if existing.CreatedAt.IsZero() {
-				p.CreatedAt = now
-			} else {
-				p.CreatedAt = existing.CreatedAt
-			}
-			profiles[i] = p
-			found = true
-			break
-		}
-	}
-	if !found {
-		if p.CreatedAt.IsZero() {
-			p.CreatedAt = now
-		}
-		profiles = append(profiles, p)
-	}
+	p = upsertProfile(&profiles, p, now, 0)
 
 	out, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
@@ -163,6 +132,73 @@ func (ps *profileStore) Save(p SearchProfile) (SearchProfile, error) {
 		return p, err
 	}
 	return p, nil
+}
+
+func (ps *profileStore) readAllLocked() ([]SearchProfile, error) {
+	var profiles []SearchProfile
+	data, err := os.ReadFile(ps.filePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading existing profiles: %w", err)
+		}
+		return profiles, nil
+	}
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &profiles); err != nil {
+			return nil, fmt.Errorf("parsing existing profiles: %w", err)
+		}
+	}
+	return profiles, nil
+}
+
+func upsertProfile(profiles *[]SearchProfile, p SearchProfile, now time.Time, seqOffset int) SearchProfile {
+	if strings.TrimSpace(p.ID) == "" {
+		p.ID = fmt.Sprintf("prof_%d", now.UnixNano()+int64(seqOffset))
+		p.CreatedAt = now
+	}
+	p.UpdatedAt = now
+
+	for i, existing := range *profiles {
+		if existing.ID == p.ID {
+			if existing.CreatedAt.IsZero() {
+				p.CreatedAt = now
+			} else {
+				p.CreatedAt = existing.CreatedAt
+			}
+			(*profiles)[i] = p
+			return p
+		}
+	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = now
+	}
+	*profiles = append(*profiles, p)
+	return p
+}
+
+// SaveBatch upserts all incoming profiles into the store in a single atomic write.
+func (ps *profileStore) SaveBatch(incoming []SearchProfile) ([]SearchProfile, error) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	profiles, err := ps.readAllLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	for i, p := range incoming {
+		upsertProfile(&profiles, p, now, i)
+	}
+
+	out, err := json.MarshalIndent(profiles, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := writeFileAtomic(ps.filePath, out, 0644); err != nil {
+		return nil, err
+	}
+	return profiles, nil
 }
 
 func (ps *profileStore) Delete(id string) (bool, error) {
@@ -212,17 +248,10 @@ func (s *Server) handleGetProfiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
 }
 
-func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
-	var p SearchProfile
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid profile payload: " + err.Error()})
-		return
-	}
+func sanitizeProfile(p SearchProfile) (SearchProfile, error) {
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Profile name is required"})
-		return
+		return p, fmt.Errorf("Profile name is required")
 	}
 	if len(p.History) > maxProfileHistoryEntries {
 		drop := len(p.History) - maxProfileHistoryEntries
@@ -238,12 +267,79 @@ func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
 			p.HistoryIndex = len(p.History) - 1
 		}
 	}
-	saved, err := s.profiles.Save(p)
+	return p, nil
+}
+
+func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+	var p SearchProfile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid profile payload: " + err.Error()})
+		return
+	}
+	sanitized, err := sanitizeProfile(p)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	saved, err := s.profiles.Save(sanitized)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "Saving profile failed: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"profile": saved})
+}
+
+func (s *Server) handleImportProfiles(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid import payload: " + err.Error()})
+		return
+	}
+
+	var incoming []SearchProfile
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &incoming); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid profiles array: " + err.Error()})
+			return
+		}
+	} else {
+		var wrapper struct {
+			Profiles []SearchProfile `json:"profiles"`
+		}
+		if err := json.Unmarshal(trimmed, &wrapper); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Invalid profiles payload: " + err.Error()})
+			return
+		}
+		incoming = wrapper.Profiles
+	}
+
+	if len(incoming) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "No profiles provided for import"})
+		return
+	}
+
+	sanitized := make([]SearchProfile, 0, len(incoming))
+	for i, p := range incoming {
+		clean, err := sanitizeProfile(p)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("Profile %d: %s", i+1, err.Error())})
+			return
+		}
+		sanitized = append(sanitized, clean)
+	}
+
+	allProfiles, err := s.profiles.SaveBatch(sanitized)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "Importing profiles failed: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"profiles": allProfiles,
+		"imported": len(sanitized),
+	})
 }
 
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {

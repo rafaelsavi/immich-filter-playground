@@ -375,3 +375,61 @@ func TestProfileStoreSafety(t *testing.T) {
 		t.Fatalf("expected corrupt profiles.json to remain untouched, got %q (err=%v)", string(after), err)
 	}
 }
+
+func TestImportProfilesEndpoint(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.ProfilesFile = filepath.Join(t.TempDir(), "profiles.json")
+	srv := New(cfg, "1.9.0")
+
+	// 1. Reject empty array
+	recEmpty := httptest.NewRecorder()
+	srv.ServeHTTP(recEmpty, httptest.NewRequest(http.MethodPost, "/api/profiles/import", bytes.NewBufferString(`[]`)))
+	if recEmpty.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty import, got %d", recEmpty.Code)
+	}
+
+	// 2. Import raw JSON array (including one without ID and one with explicit ID)
+	arrBody := `[{"name":"Alpha","filterJson":"{}"},{"id":"prof_keep","name":"Beta","filterJson":"{\"isFavorite\":{\"eq\":true}}"}]`
+	recArr := httptest.NewRecorder()
+	srv.ServeHTTP(recArr, httptest.NewRequest(http.MethodPost, "/api/profiles/import", bytes.NewBufferString(arrBody)))
+	if recArr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for array import, got %d (%s)", recArr.Code, recArr.Body.String())
+	}
+	var resp1 struct {
+		Profiles []SearchProfile `json:"profiles"`
+		Imported int             `json:"imported"`
+	}
+	if err := json.Unmarshal(recArr.Body.Bytes(), &resp1); err != nil {
+		t.Fatalf("decode import 1: %v", err)
+	}
+	if resp1.Imported != 2 || len(resp1.Profiles) != 2 {
+		t.Fatalf("expected 2 imported profiles, got %+v", resp1)
+	}
+
+	// 3. Import wrapper object updating existing ID and adding another
+	wrapBody := `{"profiles":[{"id":"prof_keep","name":"Beta Updated","filterJson":"{}"},{"name":"Gamma","filterJson":"{}"}]}`
+	recWrap := httptest.NewRecorder()
+	srv.ServeHTTP(recWrap, httptest.NewRequest(http.MethodPost, "/api/profiles/import", bytes.NewBufferString(wrapBody)))
+	if recWrap.Code != http.StatusOK {
+		t.Fatalf("expected 200 for wrapper import, got %d (%s)", recWrap.Code, recWrap.Body.String())
+	}
+	var resp2 struct {
+		Profiles []SearchProfile `json:"profiles"`
+		Imported int             `json:"imported"`
+	}
+	if err := json.Unmarshal(recWrap.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode import 2: %v", err)
+	}
+	if resp2.Imported != 2 || len(resp2.Profiles) != 3 {
+		t.Fatalf("expected 3 total profiles after upsert, got %d (imported=%d)", len(resp2.Profiles), resp2.Imported)
+	}
+	var betaName string
+	for _, p := range resp2.Profiles {
+		if p.ID == "prof_keep" {
+			betaName = p.Name
+		}
+	}
+	if betaName != "Beta Updated" {
+		t.Errorf("expected prof_keep to be updated to 'Beta Updated', got %q", betaName)
+	}
+}

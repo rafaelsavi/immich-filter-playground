@@ -104,6 +104,13 @@
 								<button type="button" class="btn btn-xs btn-secondary" id="btn-copy-profile" title="Create a separate profile from the current filter">
 									<span>⧉ Save as Copy</span>
 								</button>
+								<button type="button" class="btn btn-xs btn-ghost" id="btn-export-profiles" title="Export saved profiles to a JSON file" hidden>
+									<span>⇩ Export</span>
+								</button>
+								<button type="button" class="btn btn-xs btn-ghost" id="btn-import-profiles" title="Import profiles from a JSON file">
+									<span>⇧ Import</span>
+								</button>
+								<input type="file" id="import-profiles-input" accept=".json,application/json" hidden>
 								<button type="button" class="btn btn-xs btn-ghost text-danger" id="btn-delete-profile" title="Delete selected custom profile" hidden>
 									<span>🗑️</span>
 								</button>

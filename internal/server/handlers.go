@@ -281,6 +281,7 @@ type searchRequest struct {
 	User             string `json:"user"`
 	Limit            int    `json:"limit"`
 	SearchMode       string `json:"searchMode"`
+	SmartQuery       string `json:"smartQuery"`
 	OrderByField     string `json:"orderByField"`
 	OrderByDirection string `json:"orderByDirection"`
 	IncludeVideos    *bool  `json:"includeVideos"`
@@ -317,16 +318,16 @@ type assetItem struct {
 }
 
 type searchResponse struct {
-	Total            int          `json:"total"`
-	TotalExact       bool         `json:"totalExact"`
-	CountPending     bool         `json:"countPending,omitempty"`
-	Limit            int          `json:"limit"`
-	SearchMode       string       `json:"searchMode"`
-	NormalizedFilter string       `json:"normalizedFilter"`
-	RequestBodyJSON  string       `json:"requestBodyJson"`
-	Assets           []assetItem  `json:"assets"`
-	Error            string       `json:"error,omitempty"`
-	Warnings         []string     `json:"warnings,omitempty"`
+	Total            int         `json:"total"`
+	TotalExact       bool        `json:"totalExact"`
+	CountPending     bool        `json:"countPending,omitempty"`
+	Limit            int         `json:"limit"`
+	SearchMode       string      `json:"searchMode"`
+	NormalizedFilter string      `json:"normalizedFilter"`
+	RequestBodyJSON  string      `json:"requestBodyJson"`
+	Assets           []assetItem `json:"assets"`
+	Error            string      `json:"error,omitempty"`
+	Warnings         []string    `json:"warnings,omitempty"`
 }
 
 type userFilterQuery struct {
@@ -339,6 +340,7 @@ type userFilterQuery struct {
 type resolvedSearch struct {
 	limit            int
 	searchMode       string
+	smartQuery       string
 	includeVideos    bool
 	includeArchived  bool
 	normalizedFilter string
@@ -362,8 +364,14 @@ func (s *Server) resolveSearch(req searchRequest) (resolvedSearch, string) {
 	}
 
 	rs.searchMode = strings.ToLower(strings.TrimSpace(req.SearchMode))
-	if rs.searchMode != "metadata" && rs.searchMode != "random" {
+	if rs.searchMode != "metadata" && rs.searchMode != "random" && rs.searchMode != "smart" {
 		rs.searchMode = s.cfg.Defaults.SearchMode
+	}
+	if rs.searchMode == "smart" {
+		rs.smartQuery = strings.TrimSpace(req.SmartQuery)
+		if rs.smartQuery == "" {
+			return rs, "Smart Search needs a search phrase. Type one and press Enter."
+		}
 	}
 
 	rs.includeVideos = s.cfg.Defaults.IncludeVideos
@@ -545,11 +553,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, searchMode, queries, orderBy := rs.limit, rs.searchMode, rs.queries, rs.orderBy
 	includeVideos, includeArchived := rs.includeVideos, rs.includeArchived
+	// Smart (semantic) search has no filter-only total to count, so it never counts.
+	doCount := !req.SkipCount && searchMode != "smart"
+	deferCount := req.SkipCount && searchMode != "smart"
 
 	// Build representative request body JSON for display
 	repFilter := immich.ApplyDefaultConstraints(queries[0].filter, includeVideos, includeArchived)
 	repReqBody := immich.SearchRequestBody{
 		Filter:     repFilter,
+		Query:      rs.smartQuery,
 		OrderBy:    orderBy,
 		Size:       limit,
 		WithExif:   true,
@@ -566,7 +578,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	var countWG sync.WaitGroup
 	totalMatching := 0
 	isExactCount := true
-	if !req.SkipCount {
+	if doCount {
 		countWG.Add(1)
 		go func() {
 			defer countWG.Done()
@@ -580,7 +592,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		apiKey := s.cfg.APIKeyForUser(query.user)
 
 		g.Go(func() error {
-			items, err := s.executeUserSearch(r.Context(), apiKey, query, limit, searchMode, orderBy, includeVideos, includeArchived)
+			items, err := s.executeUserSearch(r.Context(), apiKey, query, limit, searchMode, orderBy, includeVideos, includeArchived, rs.smartQuery)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -620,8 +632,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, searchResponse{
 		Total:            totalMatching,
-		TotalExact:       isExactCount && !req.SkipCount,
-		CountPending:     req.SkipCount,
+		TotalExact:       isExactCount && !deferCount,
+		CountPending:     deferCount,
 		Limit:            limit,
 		SearchMode:       searchMode,
 		NormalizedFilter: rs.normalizedFilter,
@@ -655,11 +667,14 @@ func (s *Server) executeUserSearch(
 	searchMode string,
 	orderBy *immich.SearchOrder,
 	includeVideos, includeArchived bool,
+	smartQuery string,
 ) ([]assetItem, error) {
 	var assets []immich.Asset
 	var err error
 
-	if searchMode == "metadata" {
+	if searchMode == "smart" {
+		assets, err = s.client.SearchSmart(ctx, apiKey, q.filter, smartQuery, limit, includeVideos, includeArchived)
+	} else if searchMode == "metadata" {
 		resp, metaErr := s.client.SearchMetadata(ctx, apiKey, q.filter, limit, orderBy, includeVideos, includeArchived)
 		err = metaErr
 		assets = resp.Assets.Items
@@ -916,4 +931,3 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
-

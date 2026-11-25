@@ -461,6 +461,41 @@ func (c *Client) SearchMetadata(ctx context.Context, apiKey string, filter Searc
 	return response, nil
 }
 
+// SearchSmart queries /api/search/smart (CLIP semantic search) with a natural-language
+// phrase, constrained by the given SearchFilter.
+func (c *Client) SearchSmart(ctx context.Context, apiKey string, filter SearchFilter, query string, size int, includeVideos, includeArchived bool) ([]Asset, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("smart search needs a search phrase")
+	}
+	if size <= 0 {
+		size = 24
+	}
+
+	reqBody := SearchRequestBody{
+		Filter:     ApplyDefaultConstraints(filter, includeVideos, includeArchived),
+		Query:      query,
+		Size:       size,
+		WithExif:   true,
+		WithPeople: true,
+	}
+
+	data, _, err := c.doJSON(ctx, apiKey, http.MethodPost, SearchSmartEndpoint, nil, reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var metaResp SearchMetadataResponse
+	if err := json.Unmarshal(data, &metaResp); err == nil && (metaResp.Assets.Items != nil || metaResp.Assets.Total > 0) {
+		return metaResp.Assets.Items, nil
+	}
+	var list []Asset
+	if err := json.Unmarshal(data, &list); err == nil {
+		return list, nil
+	}
+	return nil, nil
+}
+
 type cachedAssetCount struct {
 	total int
 	exact bool
@@ -586,4 +621,3 @@ func setToSortedSlice(m map[string]struct{}) []string {
 	sort.Strings(out)
 	return out
 }
-

@@ -9,6 +9,7 @@ const state = {
 	accountDetails: [],
 	selectedUser: '',
 	searchMode: 'random',
+	smartQuery: '',
 	orderByField: 'localDateTime',
 	orderByDirection: 'desc',
 	sampleSize: 24,
@@ -1485,6 +1486,11 @@ function updateCodeViewers(ast, skipFilterEditor) {
 	} else {
 		url.searchParams.delete('mode');
 	}
+	if (state.searchMode === 'smart' && state.smartQuery) {
+		url.searchParams.set('q', state.smartQuery);
+	} else {
+		url.searchParams.delete('q');
+	}
 	if (state.searchMode === 'metadata' && (state.orderByField !== 'localDateTime' || state.orderByDirection !== 'desc')) {
 		url.searchParams.set('sort', `${state.orderByField}:${state.orderByDirection}`);
 	} else {
@@ -1511,7 +1517,7 @@ function updateCodeViewers(ast, skipFilterEditor) {
 }
 
 function updateRequestAndCurlPreviews() {
-	const endpoint = state.searchMode === 'metadata' ? '/api/search/metadata' : '/api/search/random';
+	const endpoint = { metadata: '/api/search/metadata', smart: '/api/search/smart' }[state.searchMode] || '/api/search/random';
 	const hintEl = document.getElementById('endpoint-hint-label');
 	if (hintEl) hintEl.textContent = 'POST ' + endpoint;
 
@@ -1571,6 +1577,12 @@ async function runLiveSearch(filterJsonStr) {
 	const thisSeq = ++searchSequenceId;
 
 	const countBadge = document.getElementById('results-count-badge');
+	if (state.searchMode === 'smart' && !state.smartQuery.trim()) {
+		// Nothing to search for yet; show a hint instead of an error.
+		renderSearchResults({ assets: [], total: 0, totalExact: true });
+		if (countBadge) countBadge.textContent = 'Type a phrase and press Enter';
+		return;
+	}
 	if (countBadge) countBadge.textContent = 'Searching Immich...';
 
 	const editorEl = document.getElementById('filter-json-editor');
@@ -1581,6 +1593,7 @@ async function runLiveSearch(filterJsonStr) {
 		user: state.selectedUser,
 		limit: state.sampleSize,
 		searchMode: state.searchMode,
+		smartQuery: state.smartQuery,
 		orderByField: state.orderByField,
 		orderByDirection: state.orderByDirection,
 		includeVideos: state.includeVideos,
@@ -1622,6 +1635,8 @@ function updateCountBadge() {
 	const exact = state.lastTotalExact;
 	if (shown === 0) {
 		countBadge.textContent = '0 matching';
+	} else if (state.searchMode === 'smart') {
+		countBadge.textContent = `${shown.toLocaleString()} closest matches`;
 	} else if (state.countPending) {
 		countBadge.textContent = `Showing ${shown} · counting matches…`;
 	} else if (total > shown) {
@@ -1638,7 +1653,7 @@ function updateLoadMore() {
 	if (!loadMoreWrap) return;
 	const shown = state.lastAssets.length;
 	// While the count is pending, assume more exists whenever the page came back full.
-	const hasMore = state.countPending
+	const hasMore = (state.countPending || state.searchMode === 'smart')
 		? shown >= state.sampleSize
 		: (state.lastTotal > shown || !state.lastTotalExact);
 	loadMoreWrap.hidden = shown === 0 || !(hasMore && state.sampleSize < 200);
@@ -2004,9 +2019,10 @@ async function bootstrapApp() {
 			return;
 		}
 
-		if (initialMode === 'random' || initialMode === 'metadata') {
+		if (initialMode === 'random' || initialMode === 'metadata' || initialMode === 'smart') {
 			state.searchMode = initialMode;
 		}
+		state.smartQuery = urlParams.get('q') || '';
 		if (initialSort && initialSort.includes(':')) {
 			const [field, dir] = initialSort.split(':');
 			if (field) state.orderByField = field;
@@ -2322,8 +2338,12 @@ function syncToolbarControls() {
 
 	const randomPanel = document.getElementById('random-mode-panel');
 	const sortedPanel = document.getElementById('sorted-mode-panel');
+	const smartPanel = document.getElementById('smart-mode-panel');
 	if (randomPanel) randomPanel.hidden = (state.searchMode !== 'random');
 	if (sortedPanel) sortedPanel.hidden = (state.searchMode !== 'metadata');
+	if (smartPanel) smartPanel.hidden = (state.searchMode !== 'smart');
+	const smartInput = document.getElementById('smart-query-input');
+	if (smartInput && smartInput.value !== state.smartQuery) smartInput.value = state.smartQuery;
 
 	const sortSelect = document.getElementById('metadata-sort-select');
 	if (sortSelect && state.orderByField) {
@@ -2427,7 +2447,7 @@ async function loadProfiles() {
 function isLocalPendingProfileNewer(localProfile, serverProfile) {
 	const profileFields = [
 		'id', 'name', 'isDefault', 'filterJson', 'ruleTree', 'history', 'historyIndex',
-		'searchMode', 'user', 'limit', 'orderByField', 'orderByDirection',
+		'searchMode', 'smartQuery', 'user', 'limit', 'orderByField', 'orderByDirection',
 		'includeVideos', 'includeArchived'
 	];
 	const hasSameSavedData = profileFields.every(field =>
@@ -2501,6 +2521,7 @@ function getProfileSnapshot() {
 		filterJson: JSON.stringify(compileGroupToAST(state.ruleTree)),
 		ruleTree: JSON.parse(JSON.stringify(state.ruleTree)),
 		searchMode: state.searchMode,
+		smartQuery: state.smartQuery,
 		user: state.selectedUser,
 		limit: state.sampleSize,
 		orderByField: state.orderByField,
@@ -2726,8 +2747,11 @@ function getHistoryDescription(previous, next, includeMetadata = false) {
 		return getHistoryFilterChange(previous.ruleTree, next.ruleTree, includeMetadata);
 	}
 	if (previous.searchMode !== next.searchMode) {
-		const modes = { random: 'Random sample', metadata: 'Sorted timeline' };
+		const modes = { random: 'Random sample', metadata: 'Sorted timeline', smart: 'Smart search' };
 		return { label: 'Changed search mode', detail: `${modes[previous.searchMode] || previous.searchMode} → ${modes[next.searchMode] || next.searchMode}` };
+	}
+	if ((previous.smartQuery || '') !== (next.smartQuery || '')) {
+		return { label: 'Changed smart search phrase', detail: `"${previous.smartQuery || ''}" → "${next.smartQuery || ''}"` };
 	}
 	if (previous.user !== next.user) {
 		return { label: 'Changed target account', detail: `${previous.user || 'All accounts'} → ${next.user || 'All accounts'}` };
@@ -3074,6 +3098,7 @@ function applyProfileSnapshot(snapshot) {
 	const previousUser = state.selectedUser;
 	state.ruleTree = JSON.parse(JSON.stringify(snapshot.ruleTree));
 	state.searchMode = snapshot.searchMode || 'random';
+	state.smartQuery = snapshot.smartQuery || '';
 	state.selectedUser = snapshot.user || '';
 	state.sampleSize = snapshot.limit || 24;
 	state.orderByField = snapshot.orderByField || 'localDateTime';
@@ -3175,6 +3200,7 @@ function applyProfile(profileId) {
 			}
 
 			if (prof.searchMode) state.searchMode = prof.searchMode;
+			state.smartQuery = prof.smartQuery || '';
 			if (prof.orderByField) state.orderByField = prof.orderByField;
 			if (prof.orderByDirection) state.orderByDirection = prof.orderByDirection;
 			if (prof.limit && prof.limit > 0) state.sampleSize = prof.limit;
@@ -3249,7 +3275,7 @@ function openSaveProfileModal(asCopy = false) {
 	const userEl = document.getElementById('profile-summary-user');
 	const togglesEl = document.getElementById('profile-summary-toggles');
 
-	if (modeEl) modeEl.textContent = `⚡ Mode: ${state.searchMode === 'metadata' ? 'Sorted Timeline' : 'Random Sample'}` + (state.searchMode === 'metadata' ? ` (${state.orderByField} ${state.orderByDirection.toUpperCase()})` : '');
+	if (modeEl) modeEl.textContent = `⚡ Mode: ${{ metadata: 'Sorted Timeline', smart: `Smart Search "${state.smartQuery}"` }[state.searchMode] || 'Random Sample'}` + (state.searchMode === 'metadata' ? ` (${state.orderByField} ${state.orderByDirection.toUpperCase()})` : '');
 	if (userEl) userEl.textContent = `👤 Account: ${state.selectedUser ? `@${state.selectedUser}` : 'All Accounts'}`;
 	if (togglesEl) togglesEl.textContent = `🎬 Videos: ${state.includeVideos ? 'Included' : 'Excluded'}, Archived: ${state.includeArchived ? 'Included' : 'Excluded'}, Sample: ${state.sampleSize}`;
 
@@ -3280,6 +3306,7 @@ async function handleSaveProfileSubmit(e) {
 		filterJson: snapshot.filterJson,
 		ruleTree: snapshot.ruleTree,
 		searchMode: state.searchMode,
+		smartQuery: state.smartQuery,
 		user: state.selectedUser,
 		limit: state.sampleSize,
 		orderByField: state.orderByField,
@@ -3819,13 +3846,17 @@ document.addEventListener('DOMContentLoaded', () => {
 		});
 	}
 
-	// Search Mode (Random vs Metadata)
+	// Search Mode (Random vs Metadata vs Smart)
 	document.querySelectorAll('.seg-btn[data-search-mode], .mode-toggle-btn[data-search-mode]').forEach(btn => {
 		btn.addEventListener('click', () => {
 			if (btn.dataset.searchMode === state.searchMode) return;
 			state.searchMode = btn.dataset.searchMode;
 			syncToolbarControls();
 			syncFromRuleTree();
+			if (state.searchMode === 'smart' && !state.smartQuery.trim()) {
+				const smartInput = document.getElementById('smart-query-input');
+				if (smartInput) smartInput.focus();
+			}
 		});
 	});
 
@@ -3836,6 +3867,24 @@ document.addEventListener('DOMContentLoaded', () => {
 			runLiveSearch();
 		});
 	}
+
+	// Smart Search phrase: runs on Enter or the Search button (semantic search is expensive)
+	const smartInputEl = document.getElementById('smart-query-input');
+	const runSmartSearch = () => {
+		state.smartQuery = smartInputEl ? smartInputEl.value.trim() : '';
+		syncFromRuleTree({ skipFilterEditor: true });
+	};
+	if (smartInputEl) {
+		smartInputEl.addEventListener('input', () => { state.smartQuery = smartInputEl.value; });
+		smartInputEl.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				runSmartSearch();
+			}
+		});
+	}
+	const smartRunBtn = document.getElementById('btn-smart-run');
+	if (smartRunBtn) smartRunBtn.addEventListener('click', runSmartSearch);
 
 	// Metadata Sort
 	const sortSelect = document.getElementById('metadata-sort-select');

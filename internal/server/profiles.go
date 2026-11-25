@@ -22,6 +22,7 @@ type SearchProfile struct {
 	History          []ProfileHistoryEntry `json:"history,omitempty"`
 	HistoryIndex     int                   `json:"historyIndex"`
 	SearchMode       string                `json:"searchMode,omitempty"`
+	SmartQuery       string                `json:"smartQuery,omitempty"`
 	User             string                `json:"user,omitempty"`
 	Limit            int                   `json:"limit,omitempty"`
 	OrderByField     string                `json:"orderByField,omitempty"`

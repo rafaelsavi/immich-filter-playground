@@ -1320,6 +1320,21 @@ p, blockquote, li, .pretty-text {
 	gap: 0.55rem;
 }
 
+.smart-query-group {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	flex: 1 1 320px;
+	min-width: 0;
+}
+
+.smart-query-input {
+	flex: 1;
+	min-width: 160px;
+	padding: 0.35rem 0.7rem;
+	font-size: 0.8rem;
+}
+
 .sort-label {
 	font-size: 0.78rem;
 	font-weight: 700;

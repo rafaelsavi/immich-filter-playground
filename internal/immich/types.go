@@ -118,6 +118,7 @@ const (
 
 	SearchRandomEndpoint   = "api/search/random"
 	SearchMetadataEndpoint = "api/search/metadata"
+	SearchSmartEndpoint    = "api/search/smart"
 )
 
 type ExifInfo struct {
@@ -351,13 +352,14 @@ type SearchFilter struct {
 }
 
 type SearchRequestBody struct {
-	Cursor      string        `json:"cursor,omitempty"`
-	Filter      SearchFilter  `json:"filter"`
-	OrderBy     *SearchOrder  `json:"orderBy,omitempty,omitzero"`
-	Size        int           `json:"size,omitempty"`
-	WithExif    bool          `json:"withExif,omitempty"`
-	WithPeople  bool          `json:"withPeople,omitempty"`
-	WithStacked bool          `json:"withStacked,omitempty"`
+	Cursor      string       `json:"cursor,omitempty"`
+	Filter      SearchFilter `json:"filter"`
+	Query       string       `json:"query,omitempty"`
+	OrderBy     *SearchOrder `json:"orderBy,omitempty,omitzero"`
+	Size        int          `json:"size,omitempty"`
+	WithExif    bool         `json:"withExif,omitempty"`
+	WithPeople  bool         `json:"withPeople,omitempty"`
+	WithStacked bool         `json:"withStacked,omitempty"`
 }
 
 type SearchMetadataResponse struct {
@@ -378,4 +380,3 @@ type LocationMetadata struct {
 	Makes     []string `json:"makes"`
 	Lenses    []string `json:"lenses"`
 }
-

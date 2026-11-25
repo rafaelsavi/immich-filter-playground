@@ -234,6 +234,9 @@
 								<button type="button" class="mode-toggle-btn" data-search-mode="metadata" role="radio" aria-checked="false" title="Sorted Timeline (Immich /api/search/metadata endpoint)">
 									📅 Sorted Timeline
 								</button>
+								<button type="button" class="mode-toggle-btn" data-search-mode="smart" role="radio" aria-checked="false" title="Smart Search (Immich /api/search/smart endpoint, CLIP semantic search)">
+									✨ Smart Search
+								</button>
 							</div>
 						</div>
 
@@ -265,6 +268,16 @@
 									</div>
 								</div>
 								<span class="mode-context-hint">Chronological or attribute-sorted timeline</span>
+							</div>
+
+							<!-- Smart Search Mode Panel -->
+							<div id="smart-mode-panel" class="mode-panel" hidden>
+								<div class="smart-query-group">
+									<label for="smart-query-input" class="sort-label">Describe it:</label>
+									<input type="search" id="smart-query-input" class="form-input smart-query-input" placeholder="e.g. sunset over the beach, birthday cake…" autocomplete="off" spellcheck="false" aria-label="Smart search phrase">
+									<button type="button" class="btn btn-sm btn-primary" id="btn-smart-run" title="Run semantic search (Enter)">Search</button>
+								</div>
+								<span class="mode-context-hint">Semantic (CLIP) search, combined with your filter rules</span>
 							</div>
 						</div>
 

@@ -191,10 +191,16 @@ type StringFilter struct {
 }
 
 type StringFilterNullable struct {
-	Eq    string   `json:"eq,omitempty,omitzero"`
-	In    []string `json:"in,omitempty,omitzero"`
-	Ne    string   `json:"ne,omitempty,omitzero"`
-	NotIn []string `json:"notIn,omitempty,omitzero"`
+	Eq     string   `json:"eq,omitempty,omitzero"`
+	In     []string `json:"in,omitempty,omitzero"`
+	Ne     string   `json:"ne,omitempty,omitzero"`
+	NotIn  []string `json:"notIn,omitempty,omitzero"`
+	EqNull bool     `json:"-"`
+	NeNull bool     `json:"-"`
+}
+
+func (s StringFilterNullable) IsZero() bool {
+	return s.Eq == "" && !s.EqNull && len(s.In) == 0 && s.Ne == "" && !s.NeNull && len(s.NotIn) == 0
 }
 
 type BoolFilter struct {
@@ -228,25 +234,37 @@ type StringPatternFilter struct {
 }
 
 type NumberFilter struct {
-	Eq    float64   `json:"eq,omitempty,omitzero"`
-	Gt    float64   `json:"gt,omitempty,omitzero"`
-	Gte   float64   `json:"gte,omitempty,omitzero"`
+	Eq    *float64  `json:"eq,omitempty"`
+	Gt    *float64  `json:"gt,omitempty"`
+	Gte   *float64  `json:"gte,omitempty"`
 	In    []float64 `json:"in,omitempty,omitzero"`
-	Lt    float64   `json:"lt,omitempty,omitzero"`
-	Lte   float64   `json:"lte,omitempty,omitzero"`
-	Ne    float64   `json:"ne,omitempty,omitzero"`
+	Lt    *float64  `json:"lt,omitempty"`
+	Lte   *float64  `json:"lte,omitempty"`
+	Ne    *float64  `json:"ne,omitempty"`
 	NotIn []float64 `json:"notIn,omitempty,omitzero"`
 }
 
+func (n NumberFilter) IsZero() bool {
+	return n.Eq == nil && n.Gt == nil && n.Gte == nil && len(n.In) == 0 &&
+		n.Lt == nil && n.Lte == nil && n.Ne == nil && len(n.NotIn) == 0
+}
+
 type NumberFilterNullable struct {
-	Eq    float64   `json:"eq,omitempty,omitzero"`
-	Gt    float64   `json:"gt,omitempty,omitzero"`
-	Gte   float64   `json:"gte,omitempty,omitzero"`
-	In    []float64 `json:"in,omitempty,omitzero"`
-	Lt    float64   `json:"lt,omitempty,omitzero"`
-	Lte   float64   `json:"lte,omitempty,omitzero"`
-	Ne    float64   `json:"ne,omitempty,omitzero"`
-	NotIn []float64 `json:"notIn,omitempty,omitzero"`
+	Eq     *float64  `json:"eq,omitempty"`
+	Gt     *float64  `json:"gt,omitempty"`
+	Gte    *float64  `json:"gte,omitempty"`
+	In     []float64 `json:"in,omitempty,omitzero"`
+	Lt     *float64  `json:"lt,omitempty"`
+	Lte    *float64  `json:"lte,omitempty"`
+	Ne     *float64  `json:"ne,omitempty"`
+	NotIn  []float64 `json:"notIn,omitempty,omitzero"`
+	EqNull bool      `json:"-"`
+	NeNull bool      `json:"-"`
+}
+
+func (n NumberFilterNullable) IsZero() bool {
+	return n.Eq == nil && !n.EqNull && n.Gt == nil && n.Gte == nil && len(n.In) == 0 &&
+		n.Lt == nil && n.Lte == nil && n.Ne == nil && !n.NeNull && len(n.NotIn) == 0
 }
 
 type IDFilter struct {

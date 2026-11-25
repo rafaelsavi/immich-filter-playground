@@ -104,11 +104,14 @@ const FIELD_DEFINITIONS = [
 	{ value: 'visibility', label: '👁️ Visibility', type: 'enum' },
 	{ value: 'rating', label: '⭐ Rating', type: 'rating' },
 	{ value: 'date', label: '📅 Date Taken', type: 'date' },
+	{ value: 'created_date', label: '📥 Date Added', type: 'date' },
 	{ value: 'has_people', label: '👤 Has People', type: 'bool' },
 	{ value: 'has_albums', label: '📁 Has Albums', type: 'bool' },
 	{ value: 'has_tags', label: '🏷️ Has Tags', type: 'bool' },
 	{ value: 'description', label: '📝 Description', type: 'pattern' },
 	{ value: 'filename', label: '📄 Filename', type: 'pattern' },
+	{ value: 'original_path', label: '🗂️ Original Path', type: 'pattern' },
+	{ value: 'file_size', label: '💾 File Size', type: 'size' },
 	{ value: 'ocr', label: '🔤 OCR Text', type: 'ocr' }
 ];
 
@@ -138,10 +141,14 @@ function getDefaultOperatorForField(field) {
 		case 'rating':
 			return 'gte';
 		case 'date':
+		case 'created_date':
 			return 'after';
 		case 'description':
 		case 'filename':
+		case 'original_path':
 			return 'like';
+		case 'file_size':
+			return 'gte';
 		case 'ocr':
 			return 'matches';
 		default:
@@ -159,6 +166,7 @@ function getDefaultValueForField(field) {
 	if (field === 'media_type') return 'IMAGE';
 	if (field === 'visibility') return 'timeline';
 	if (field === 'rating') return 3;
+	if (field === 'file_size') return 10;
 	return '';
 }
 
@@ -212,13 +220,15 @@ window.rtAddRule = function(groupId, defaultField) {
 	const group = findNode(state.ruleTree, groupId);
 	if (!group || group.type !== 'group') return;
 	const field = defaultField || 'people';
-	group.children.push({
+	const newRule = {
 		id: generateNodeId('r'),
 		type: 'rule',
 		field: field,
 		operator: getDefaultOperatorForField(field),
 		value: getDefaultValueForField(field)
-	});
+	};
+	if (field === 'file_size') newRule.sizeUnit = 'MB';
+	group.children.push(newRule);
 	renderRuleTree();
 	syncFromRuleTree();
 };
@@ -269,6 +279,8 @@ window.rtChangeField = function(ruleId, newField) {
 	rule.value = getDefaultValueForField(newField);
 	delete rule.dateAfter;
 	delete rule.dateBefore;
+	delete rule.sizeUnit;
+	if (newField === 'file_size') rule.sizeUnit = 'MB';
 	renderRuleTree();
 	syncFromRuleTree();
 };
@@ -281,11 +293,26 @@ window.rtChangeOperator = function(ruleId, newOp) {
 		rule.value = (newOp === 'true');
 	} else if (rule.field === 'media_type' || rule.field === 'visibility') {
 		rule.value = newOp;
-	} else if (rule.field === 'date') {
+	} else if (rule.field === 'date' || rule.field === 'created_date') {
 		if (newOp === 'after') delete rule.dateBefore;
 		else if (newOp === 'before') delete rule.dateAfter;
+	} else if (['country', 'state', 'city', 'camera', 'make', 'lens'].includes(rule.field)) {
+		if (['in', 'notIn', 'eq'].includes(newOp) && !Array.isArray(rule.value)) {
+			rule.value = [];
+		}
+	} else if (rule.field === 'rating') {
+		if (['gte', 'eq', 'lte'].includes(newOp) && !Number.isFinite(parseInt(rule.value, 10))) {
+			rule.value = 3;
+		}
 	}
 	renderRuleTree();
+	syncFromRuleTree();
+};
+
+window.rtSetSizeUnit = function(ruleId, unit) {
+	const rule = findNode(state.ruleTree, ruleId);
+	if (!rule) return;
+	rule.sizeUnit = unit;
 	syncFromRuleTree();
 };
 
@@ -801,6 +828,8 @@ function renderRuleHTML(rule) {
 		opSelect += `<option value="in" ${rule.operator === 'in' ? 'selected' : ''}>is one of (IN)</option>`;
 		opSelect += `<option value="notIn" ${rule.operator === 'notIn' ? 'selected' : ''}>is NOT one of</option>`;
 		opSelect += `<option value="eq" ${rule.operator === 'eq' ? 'selected' : ''}>equals (EQ)</option>`;
+		opSelect += `<option value="isNull" ${rule.operator === 'isNull' ? 'selected' : ''}>is empty / unknown</option>`;
+		opSelect += `<option value="isNotNull" ${rule.operator === 'isNotNull' ? 'selected' : ''}>is not empty</option>`;
 	} else if (['favorite', 'has_people', 'has_albums', 'has_tags'].includes(rule.field)) {
 		opSelect += `<option value="true" ${rule.operator === 'true' ? 'selected' : ''}>is True (Yes)</option>`;
 		opSelect += `<option value="false" ${rule.operator === 'false' ? 'selected' : ''}>is False (No)</option>`;
@@ -817,25 +846,38 @@ function renderRuleHTML(rule) {
 		opSelect += `<option value="gte" ${rule.operator === 'gte' ? 'selected' : ''}>at least (>=)</option>`;
 		opSelect += `<option value="eq" ${rule.operator === 'eq' ? 'selected' : ''}>equals (=)</option>`;
 		opSelect += `<option value="lte" ${rule.operator === 'lte' ? 'selected' : ''}>at most (<=)</option>`;
+		opSelect += `<option value="isNull" ${rule.operator === 'isNull' ? 'selected' : ''}>is unrated (null)</option>`;
+		opSelect += `<option value="isNotNull" ${rule.operator === 'isNotNull' ? 'selected' : ''}>is rated (not null)</option>`;
 	} else if (rule.field === 'date') {
 		opSelect += `<option value="after" ${rule.operator === 'after' ? 'selected' : ''}>Taken on/after</option>`;
 		opSelect += `<option value="before" ${rule.operator === 'before' ? 'selected' : ''}>Taken on/before</option>`;
 		opSelect += `<option value="between" ${rule.operator === 'between' ? 'selected' : ''}>Between dates</option>`;
-	} else if (['description', 'filename'].includes(rule.field)) {
+	} else if (rule.field === 'created_date') {
+		opSelect += `<option value="after" ${rule.operator === 'after' ? 'selected' : ''}>Added on/after</option>`;
+		opSelect += `<option value="before" ${rule.operator === 'before' ? 'selected' : ''}>Added on/before</option>`;
+		opSelect += `<option value="between" ${rule.operator === 'between' ? 'selected' : ''}>Between dates</option>`;
+	} else if (['description', 'filename', 'original_path'].includes(rule.field)) {
 		opSelect += `<option value="like" ${rule.operator === 'like' ? 'selected' : ''}>contains (LIKE)</option>`;
 		opSelect += `<option value="notLike" ${rule.operator === 'notLike' ? 'selected' : ''}>does not contain</option>`;
 		opSelect += `<option value="eq" ${rule.operator === 'eq' ? 'selected' : ''}>equals (EQ)</option>`;
 		opSelect += `<option value="startsWith" ${rule.operator === 'startsWith' ? 'selected' : ''}>starts with</option>`;
 		opSelect += `<option value="endsWith" ${rule.operator === 'endsWith' ? 'selected' : ''}>ends with</option>`;
+	} else if (rule.field === 'file_size') {
+		opSelect += `<option value="gte" ${rule.operator === 'gte' ? 'selected' : ''}>at least (>=)</option>`;
+		opSelect += `<option value="lte" ${rule.operator === 'lte' ? 'selected' : ''}>at most (<=)</option>`;
+		opSelect += `<option value="eq" ${rule.operator === 'eq' ? 'selected' : ''}>equals (=)</option>`;
 	} else if (rule.field === 'ocr') {
 		opSelect += `<option value="matches" selected>matches text</option>`;
 	}
 	opSelect += `</select>`;
 
 	let valueBox = `<div class="rt-value-box">`;
-	const isMulti = ['people', 'albums', 'tags', 'country', 'state', 'city', 'camera', 'make', 'lens'].includes(rule.field);
+	const isNullCheck = rule.operator === 'isNull' || rule.operator === 'isNotNull';
+	const isMulti = !isNullCheck && ['people', 'albums', 'tags', 'country', 'state', 'city', 'camera', 'make', 'lens'].includes(rule.field);
 
-	if (isMulti) {
+	if (isNullCheck) {
+		valueBox += `<span style="font-size: 0.78rem; color: var(--text-muted); font-style: italic;">Active condition</span>`;
+	} else if (isMulti) {
 		const available = getFieldOptionsList(rule.field);
 		const selectedVals = Array.isArray(rule.value) ? rule.value : [];
 
@@ -878,7 +920,7 @@ function renderRuleHTML(rule) {
 				${dropdownItems || '<div style="padding: 0.5rem 0.65rem; color: var(--text-muted); font-size: 0.75rem;">Type a value and press Enter</div>'}
 			</div>
 		`;
-	} else if (rule.field === 'date') {
+	} else if (rule.field === 'date' || rule.field === 'created_date') {
 		if (rule.operator === 'between') {
 			valueBox += `
 				<div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
@@ -904,12 +946,33 @@ function renderRuleHTML(rule) {
 			valueBox += `<option value="${r}" ${curRating === r ? 'selected' : ''}>${'★'.repeat(r)} (${r} Star${r > 1 ? 's' : ''})</option>`;
 		}
 		valueBox += `</select>`;
-	} else if (['description', 'filename', 'ocr'].includes(rule.field)) {
+	} else if (rule.field === 'file_size') {
+		const curUnit = rule.sizeUnit || 'MB';
+		const curVal = rule.value === null || rule.value === undefined ? '' : rule.value;
+		valueBox += `
+			<div style="display: flex; align-items: center; gap: 0.35rem;">
+				<input
+					type="number"
+					min="0"
+					step="any"
+					class="rt-text-input"
+					style="flex: 1; min-width: 80px;"
+					placeholder="Size..."
+					value="${escapeHtml(curVal)}"
+					oninput="rtSetScalarValue('${escapeHtml(rule.id)}', this.value === '' ? '' : Number(this.value))"
+				>
+				<select class="rt-select-field" style="min-width: 72px; width: auto;" onchange="rtSetSizeUnit('${escapeHtml(rule.id)}', this.value)">
+					${['B', 'KB', 'MB', 'GB'].map(u => `<option value="${u}" ${curUnit === u ? 'selected' : ''}>${u}</option>`).join('')}
+				</select>
+			</div>
+		`;
+	} else if (['description', 'filename', 'original_path', 'ocr'].includes(rule.field)) {
+		const placeholder = rule.field === 'original_path' ? 'e.g. /External/2024/...' : 'Enter text pattern...';
 		valueBox += `
 			<input
 				type="text"
 				class="rt-text-input"
-				placeholder="Enter text pattern..."
+				placeholder="${placeholder}"
 				value="${escapeHtml(rule.value || '')}"
 				oninput="rtSetScalarValue('${rule.id}', this.value)"
 			>
@@ -943,19 +1006,33 @@ function compileRuleToBranch(rule) {
 	const branch = {};
 	const { field, operator, value } = rule;
 
-	if (['favorite', 'media_type', 'visibility', 'rating', 'has_people', 'has_albums', 'has_tags'].includes(field)) {
+	if (operator === 'isNull' || operator === 'isNotNull') {
+		// Implicit null / not-null check
+	} else if (['favorite', 'media_type', 'visibility', 'rating', 'has_people', 'has_albums', 'has_tags'].includes(field)) {
 		// Implicit scalar values
-	} else if (field === 'date') {
+	} else if (field === 'date' || field === 'created_date') {
 		const needsAfter = operator === 'after' || operator === 'between' || !operator;
 		const needsBefore = operator === 'before' || operator === 'between';
 		const hasAfter = needsAfter && !!rule.dateAfter;
 		const hasBefore = needsBefore && !!rule.dateBefore;
 		if (!hasAfter && !hasBefore) return null;
-	} else if (['description', 'filename', 'ocr'].includes(field)) {
+	} else if (field === 'file_size') {
+		if (value === '' || value === null || value === undefined) return null;
+		const num = Number(value);
+		if (!Number.isFinite(num) || num < 0) return null;
+	} else if (['description', 'filename', 'original_path', 'ocr'].includes(field)) {
 		if (!value || String(value).trim() === '') return null;
 	} else {
 		if (!value || (Array.isArray(value) && value.length === 0)) return null;
 	}
+
+	const compileNullableStr = (apiKey) => {
+		if (operator === 'isNull') branch[apiKey] = { eq: null };
+		else if (operator === 'isNotNull') branch[apiKey] = { ne: null };
+		else if (operator === 'eq') branch[apiKey] = { eq: Array.isArray(value) ? value[0] : value };
+		else if (operator === 'notIn') branch[apiKey] = { notIn: Array.isArray(value) ? value : [value] };
+		else branch[apiKey] = { in: Array.isArray(value) ? value : [value] };
+	};
 
 	switch (field) {
 		case 'people':
@@ -969,30 +1046,18 @@ function compileRuleToBranch(rule) {
 			break;
 		case 'country':
 		case 'state':
-		case 'city': {
-			if (operator === 'eq') branch[field] = { eq: Array.isArray(value) ? value[0] : value };
-			else if (operator === 'notIn') branch[field] = { notIn: Array.isArray(value) ? value : [value] };
-			else branch[field] = { in: Array.isArray(value) ? value : [value] };
+		case 'city':
+			compileNullableStr(field);
 			break;
-		}
-		case 'camera': {
-			if (operator === 'eq') branch.model = { eq: Array.isArray(value) ? value[0] : value };
-			else if (operator === 'notIn') branch.model = { notIn: Array.isArray(value) ? value : [value] };
-			else branch.model = { in: Array.isArray(value) ? value : [value] };
+		case 'camera':
+			compileNullableStr('model');
 			break;
-		}
-		case 'make': {
-			if (operator === 'eq') branch.make = { eq: Array.isArray(value) ? value[0] : value };
-			else if (operator === 'notIn') branch.make = { notIn: Array.isArray(value) ? value : [value] };
-			else branch.make = { in: Array.isArray(value) ? value : [value] };
+		case 'make':
+			compileNullableStr('make');
 			break;
-		}
-		case 'lens': {
-			if (operator === 'eq') branch.lensModel = { eq: Array.isArray(value) ? value[0] : value };
-			else if (operator === 'notIn') branch.lensModel = { notIn: Array.isArray(value) ? value : [value] };
-			else branch.lensModel = { in: Array.isArray(value) ? value : [value] };
+		case 'lens':
+			compileNullableStr('lensModel');
 			break;
-		}
 		case 'favorite':
 			branch.isFavorite = { eq: operator === 'true' || value === true };
 			break;
@@ -1007,9 +1072,15 @@ function compileRuleToBranch(rule) {
 			branch.visibility = { in: [operator || value || 'timeline'] };
 			break;
 		case 'rating': {
-			const op = ['gte', 'eq', 'lte'].includes(operator) ? operator : 'gte';
-			const parsed = parseInt(value, 10);
-			branch.rating = { [op]: Number.isFinite(parsed) ? parsed : 3 };
+			if (operator === 'isNull') {
+				branch.rating = { eq: null };
+			} else if (operator === 'isNotNull') {
+				branch.rating = { ne: null };
+			} else {
+				const op = ['gte', 'eq', 'lte'].includes(operator) ? operator : 'gte';
+				const parsed = parseInt(value, 10);
+				branch.rating = { [op]: Number.isFinite(parsed) ? parsed : 3 };
+			}
 			break;
 		}
 		case 'has_people':
@@ -1022,20 +1093,33 @@ function compileRuleToBranch(rule) {
 			branch.hasTags = { eq: operator === 'true' || value === true };
 			break;
 		case 'date':
-			branch.takenAt = {};
+		case 'created_date': {
+			const apiKey = field === 'created_date' ? 'createdAt' : 'takenAt';
+			branch[apiKey] = {};
 			if ((operator === 'after' || operator === 'between' || !operator) && rule.dateAfter) {
-				branch.takenAt.gte = rule.dateAfter;
+				branch[apiKey].gte = rule.dateAfter;
 			}
 			if ((operator === 'before' || operator === 'between') && rule.dateBefore) {
-				branch.takenAt.lte = rule.dateBefore;
+				branch[apiKey].lte = rule.dateBefore;
 			}
 			break;
+		}
 		case 'description':
 			branch.description = { [operator || 'like']: String(value).trim() };
 			break;
 		case 'filename':
 			branch.originalFileName = { [operator || 'like']: String(value).trim() };
 			break;
+		case 'original_path':
+			branch.originalPath = { [operator || 'like']: String(value).trim() };
+			break;
+		case 'file_size': {
+			const op = ['gte', 'lte', 'eq'].includes(operator) ? operator : 'gte';
+			const factors = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
+			const factor = factors[rule.sizeUnit || 'MB'] || 1048576;
+			branch.fileSizeInBytes = { [op]: Math.round(Number(value) * factor) };
+			break;
+		}
 		case 'ocr':
 			branch.ocr = { matches: String(value).trim() };
 			break;
@@ -1233,23 +1317,35 @@ const SUPPORTED_FILTER_OPS = {
 	personIds: ['all', 'any', 'none'],
 	albumIds: ['all', 'any', 'none'],
 	tagIds: ['all', 'any', 'none'],
-	country: ['eq', 'in', 'notIn'],
-	state: ['eq', 'in', 'notIn'],
-	city: ['eq', 'in', 'notIn'],
-	model: ['eq', 'in', 'notIn'],
-	make: ['eq', 'in', 'notIn'],
-	lensModel: ['eq', 'in', 'notIn'],
+	country: ['eq', 'in', 'notIn', 'ne'],
+	state: ['eq', 'in', 'notIn', 'ne'],
+	city: ['eq', 'in', 'notIn', 'ne'],
+	model: ['eq', 'in', 'notIn', 'ne'],
+	make: ['eq', 'in', 'notIn', 'ne'],
+	lensModel: ['eq', 'in', 'notIn', 'ne'],
 	isFavorite: ['eq'],
 	isMotion: ['eq'],
 	hasPeople: ['eq'],
 	hasAlbums: ['eq'],
 	hasTags: ['eq'],
-	rating: ['eq', 'gte', 'lte'],
+	rating: ['eq', 'gte', 'lte', 'ne'],
 	takenAt: ['gte', 'lte'],
+	createdAt: ['gte', 'lte'],
 	description: ['like', 'notLike', 'eq', 'startsWith', 'endsWith'],
 	originalFileName: ['like', 'notLike', 'eq', 'startsWith', 'endsWith'],
+	originalPath: ['like', 'notLike', 'eq', 'startsWith', 'endsWith'],
+	fileSizeInBytes: ['gte', 'lte', 'eq'],
 	ocr: ['matches']
 };
+
+function bytesToValueAndUnit(bytes) {
+	if (bytes > 0) {
+		if (bytes % 1073741824 === 0) return { value: bytes / 1073741824, sizeUnit: 'GB' };
+		if (bytes % 1048576 === 0) return { value: bytes / 1048576, sizeUnit: 'MB' };
+		if (bytes % 1024 === 0) return { value: bytes / 1024, sizeUnit: 'KB' };
+	}
+	return { value: bytes, sizeUnit: 'B' };
+}
 
 function pushRawRule(key, val, children) {
 	children.push({
@@ -1262,7 +1358,16 @@ function pushRawRule(key, val, children) {
 }
 
 function parseFieldToRules(key, val, children) {
-	if (val === null || val === undefined) return;
+	if (val === undefined) return;
+	if (val === null) {
+		if (['country', 'state', 'city', 'model', 'make', 'lensModel'].includes(key)) {
+			const field = key === 'model' ? 'camera' : (key === 'lensModel' ? 'lens' : key);
+			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'isNull', value: [] });
+		} else if (key === 'rating') {
+			children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'isNull', value: 3 });
+		}
+		return;
+	}
 	const supported = SUPPORTED_FILTER_OPS[key];
 	if (supported && val && typeof val === 'object' && !Array.isArray(val) &&
 		Object.keys(val).some(op => !supported.includes(op))) {
@@ -1289,8 +1394,17 @@ function parseFieldToRules(key, val, children) {
 		} else if (Array.isArray(val)) {
 			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'in', value: val });
 		} else if (typeof val === 'object') {
-			if (val.eq !== undefined && val.eq !== '') {
+			if (val.ne !== undefined && val.ne !== null) {
+				pushRawRule(key, val, children);
+				return;
+			}
+			if (val.eq === null) {
+				children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'isNull', value: [] });
+			} else if (val.eq !== undefined && val.eq !== '') {
 				children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'eq', value: [val.eq] });
+			}
+			if (val.ne === null) {
+				children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'isNotNull', value: [] });
 			}
 			for (const op of ['in', 'notIn']) {
 				if (Array.isArray(val[op]) && val[op].length > 0) {
@@ -1325,6 +1439,16 @@ function parseFieldToRules(key, val, children) {
 		if (typeof val === 'number') {
 			children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'eq', value: val });
 		} else if (typeof val === 'object') {
+			if (val.ne !== undefined && val.ne !== null) {
+				pushRawRule(key, val, children);
+				return;
+			}
+			if (val.eq === null) {
+				children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'isNull', value: 3 });
+			}
+			if (val.ne === null) {
+				children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: 'isNotNull', value: 3 });
+			}
 			for (const op of ['eq', 'gte', 'lte']) {
 				if (val[op] !== undefined && val[op] !== null) {
 					children.push({ id: generateNodeId('r'), type: 'rule', field: 'rating', operator: op, value: val[op] });
@@ -1340,13 +1464,14 @@ function parseFieldToRules(key, val, children) {
 	} else if (key === 'hasTags') {
 		const b = typeof val === 'boolean' ? val : !!val.eq;
 		children.push({ id: generateNodeId('r'), type: 'rule', field: 'has_tags', operator: b ? 'true' : 'false', value: b });
-	} else if (key === 'takenAt') {
+	} else if (key === 'takenAt' || key === 'createdAt') {
+		const field = key === 'createdAt' ? 'created_date' : 'date';
 		const gte = (val.gte || '').slice(0, 10);
 		const lte = (val.lte || '').slice(0, 10);
 		const op = (gte && lte) ? 'between' : (lte ? 'before' : 'after');
-		children.push({ id: generateNodeId('r'), type: 'rule', field: 'date', operator: op, dateAfter: gte, dateBefore: lte });
-	} else if (key === 'description' || key === 'originalFileName') {
-		const field = key === 'originalFileName' ? 'filename' : 'description';
+		children.push({ id: generateNodeId('r'), type: 'rule', field, operator: op, dateAfter: gte, dateBefore: lte });
+	} else if (key === 'description' || key === 'originalFileName' || key === 'originalPath') {
+		const field = key === 'originalFileName' ? 'filename' : (key === 'originalPath' ? 'original_path' : 'description');
 		if (typeof val === 'string') {
 			children.push({ id: generateNodeId('r'), type: 'rule', field, operator: 'like', value: val });
 		} else if (typeof val === 'object') {
@@ -1361,6 +1486,18 @@ function parseFieldToRules(key, val, children) {
 			if (!pushed) {
 				const firstOp = Object.keys(val)[0] || 'like';
 				children.push({ id: generateNodeId('r'), type: 'rule', field, operator: firstOp, value: val[firstOp] || '' });
+			}
+		}
+	} else if (key === 'fileSizeInBytes') {
+		if (typeof val === 'number') {
+			const { value, sizeUnit } = bytesToValueAndUnit(val);
+			children.push({ id: generateNodeId('r'), type: 'rule', field: 'file_size', operator: 'eq', value, sizeUnit });
+		} else if (typeof val === 'object') {
+			for (const op of ['gte', 'lte', 'eq']) {
+				if (typeof val[op] === 'number') {
+					const { value, sizeUnit } = bytesToValueAndUnit(val[op]);
+					children.push({ id: generateNodeId('r'), type: 'rule', field: 'file_size', operator: op, value, sizeUnit });
+				}
 			}
 		}
 	} else if (key === 'ocr') {
@@ -2554,7 +2691,10 @@ function getHistoryFieldLabel(field) {
 }
 
 function getHistoryRuleValue(rule, includeMetadata = false) {
-	if (rule.field === 'date') {
+	if (rule.operator === 'isNull' || rule.operator === 'isNotNull') {
+		return '';
+	}
+	if (rule.field === 'date' || rule.field === 'created_date') {
 		if (rule.operator === 'between') {
 			return [rule.dateAfter, rule.dateBefore].filter(Boolean).join(' to ');
 		}
@@ -2562,6 +2702,9 @@ function getHistoryRuleValue(rule, includeMetadata = false) {
 			return rule.dateBefore || '';
 		}
 		return rule.dateAfter || '';
+	}
+	if (rule.field === 'file_size') {
+		return (rule.value === '' || rule.value === null || rule.value === undefined) ? '' : `${rule.value} ${rule.sizeUnit || 'MB'}`;
 	}
 	if (Array.isArray(rule.value)) {
 		if (!rule.value.length) return '';
@@ -2592,6 +2735,8 @@ function getHistoryRuleValue(rule, includeMetadata = false) {
 
 function getHistoryRuleCondition(rule, includeMetadata = false) {
 	if (rule.field === 'raw') return `${rule.rawKey} = ${JSON.stringify(rule.rawValue)}`;
+	if (rule.operator === 'isNull') return rule.field === 'rating' ? 'is unrated (null)' : 'is empty / unknown';
+	if (rule.operator === 'isNotNull') return rule.field === 'rating' ? 'is rated (not null)' : 'is not empty';
 	const value = getHistoryRuleValue(rule, includeMetadata);
 	const isSelfDescribing = ['favorite', 'has_people', 'has_albums', 'has_tags', 'media_type', 'visibility'].includes(rule.field);
 	if (!value && !isSelfDescribing) return '';
@@ -2654,7 +2799,7 @@ function getHistoryFilterChange(previousTree, nextTree, includeMetadata = false)
 	});
 
 	if (added.length > 0 && removed.length > 0) {
-		const ruleSignature = r => JSON.stringify([r.field, r.operator, r.value, r.dateAfter || '', r.dateBefore || '', r.rawKey || '', r.rawValue === undefined ? null : r.rawValue]);
+		const ruleSignature = r => JSON.stringify([r.field, r.operator, r.value, r.dateAfter || '', r.dateBefore || '', r.sizeUnit || '', r.rawKey || '', r.rawValue === undefined ? null : r.rawValue]);
 		const removedRemaining = [...removed];
 		const filteredAdded = [];
 		for (const r of added) {

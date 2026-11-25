@@ -235,3 +235,54 @@ test('moveNodesToGroup refuses to move a group into itself and prunes emptied gr
 	assert.equal(out.moved, true);
 	assert.deepEqual(out.ids, [target.id], 'emptied source group is removed');
 });
+
+test('new fields created_date, original_path, and file_size compile and round-trip', () => {
+	const tree = group('AND', [
+		rule('created_date', 'between', '', { dateAfter: '2026-03-01', dateBefore: '2026-03-15' }),
+		rule('original_path', 'startsWith', '/External/2026/'),
+		rule('file_size', 'gte', 10, { sizeUnit: 'MB' })
+	]);
+	const ast = compile(tree);
+	assert.deepEqual(ast, {
+		createdAt: { gte: '2026-03-01', lte: '2026-03-15' },
+		originalPath: { startsWith: '/External/2026/' },
+		fileSizeInBytes: { gte: 10485760 }
+	});
+	const decompiled = call('astToRuleGroup', ast);
+	assert.deepEqual(compile(decompiled), ast);
+
+	// Non-binary byte count preserves exact bytes in B unit
+	const oddTree = call('astToRuleGroup', { fileSizeInBytes: { lte: 5000000 } });
+	assert.equal(oddTree.children[0].field, 'file_size');
+	assert.equal(oddTree.children[0].sizeUnit, 'B');
+	assert.equal(oddTree.children[0].value, 5000000);
+	assert.deepEqual(compile(oddTree), { fileSizeInBytes: { lte: 5000000 } });
+});
+
+test('nullable operators (isNull / isNotNull) compile and round-trip on string and rating fields', () => {
+	const ast = {
+		country: { eq: null },
+		city: { ne: null },
+		rating: { eq: null }
+	};
+	const tree = call('astToRuleGroup', ast);
+	assert.equal(tree.children[0].operator, 'isNull');
+	assert.equal(tree.children[1].operator, 'isNotNull');
+	assert.equal(tree.children[2].operator, 'isNull');
+	assert.deepEqual(compile(tree), ast);
+
+	const ratingNotNull = { rating: { ne: null } };
+	const rtTree = call('astToRuleGroup', ratingNotNull);
+	assert.equal(rtTree.children[0].operator, 'isNotNull');
+	assert.deepEqual(compile(rtTree), ratingNotNull);
+});
+
+test('non-null ne operator falls back to raw rule without data loss', () => {
+	const ast = {
+		country: { ne: 'France' },
+		rating: { ne: 2 }
+	};
+	const tree = call('astToRuleGroup', ast);
+	assert.equal(tree.children.every(c => c.field === 'raw'), true);
+	assert.deepEqual(compile(tree), ast);
+});

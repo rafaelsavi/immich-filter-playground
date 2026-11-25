@@ -8,7 +8,32 @@ import (
 	"time"
 )
 
+func (s StringFilterNullable) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any)
+	if s.EqNull {
+		m["eq"] = nil
+	} else if s.Eq != "" {
+		m["eq"] = s.Eq
+	}
+	if len(s.In) > 0 {
+		m["in"] = s.In
+	}
+	if s.NeNull {
+		m["ne"] = nil
+	} else if s.Ne != "" {
+		m["ne"] = s.Ne
+	}
+	if len(s.NotIn) > 0 {
+		m["notIn"] = s.NotIn
+	}
+	return json.Marshal(m)
+}
+
 func (s *StringFilterNullable) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		s.EqNull = true
+		return nil
+	}
 	var strVal string
 	if err := json.Unmarshal(data, &strVal); err == nil {
 		s.Eq = strVal
@@ -19,12 +44,31 @@ func (s *StringFilterNullable) UnmarshalJSON(data []byte) error {
 		s.In = sliceVal
 		return nil
 	}
-	type rawStringFilterNullable StringFilterNullable
-	var raw rawStringFilterNullable
+	var raw struct {
+		Eq    json.RawMessage `json:"eq"`
+		In    []string        `json:"in"`
+		Ne    json.RawMessage `json:"ne"`
+		NotIn []string        `json:"notIn"`
+	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	*s = StringFilterNullable(raw)
+	if len(raw.Eq) > 0 {
+		if bytes.Equal(bytes.TrimSpace(raw.Eq), []byte("null")) {
+			s.EqNull = true
+		} else if err := json.Unmarshal(raw.Eq, &s.Eq); err != nil {
+			return err
+		}
+	}
+	if len(raw.Ne) > 0 {
+		if bytes.Equal(bytes.TrimSpace(raw.Ne), []byte("null")) {
+			s.NeNull = true
+		} else if err := json.Unmarshal(raw.Ne, &s.Ne); err != nil {
+			return err
+		}
+	}
+	s.In = raw.In
+	s.NotIn = raw.NotIn
 	return nil
 }
 
@@ -191,18 +235,90 @@ func (ids *IDsFilter) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (n NumberFilterNullable) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any)
+	if n.EqNull {
+		m["eq"] = nil
+	} else if n.Eq != nil {
+		m["eq"] = *n.Eq
+	}
+	if n.Gt != nil {
+		m["gt"] = *n.Gt
+	}
+	if n.Gte != nil {
+		m["gte"] = *n.Gte
+	}
+	if len(n.In) > 0 {
+		m["in"] = n.In
+	}
+	if n.Lt != nil {
+		m["lt"] = *n.Lt
+	}
+	if n.Lte != nil {
+		m["lte"] = *n.Lte
+	}
+	if n.NeNull {
+		m["ne"] = nil
+	} else if n.Ne != nil {
+		m["ne"] = *n.Ne
+	}
+	if len(n.NotIn) > 0 {
+		m["notIn"] = n.NotIn
+	}
+	return json.Marshal(m)
+}
+
 func (n *NumberFilterNullable) UnmarshalJSON(data []byte) error {
-	var numVal float64
-	if err := json.Unmarshal(data, &numVal); err == nil {
-		n.Eq = numVal
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		n.EqNull = true
 		return nil
 	}
-	type rawNumberFilterNullable NumberFilterNullable
-	var raw rawNumberFilterNullable
+	var numVal float64
+	if err := json.Unmarshal(data, &numVal); err == nil {
+		n.Eq = &numVal
+		return nil
+	}
+	var raw struct {
+		Eq    json.RawMessage `json:"eq"`
+		Gt    *float64        `json:"gt"`
+		Gte   *float64        `json:"gte"`
+		In    []float64       `json:"in"`
+		Lt    *float64        `json:"lt"`
+		Lte   *float64        `json:"lte"`
+		Ne    json.RawMessage `json:"ne"`
+		NotIn []float64       `json:"notIn"`
+	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	*n = NumberFilterNullable(raw)
+	if len(raw.Eq) > 0 {
+		if bytes.Equal(bytes.TrimSpace(raw.Eq), []byte("null")) {
+			n.EqNull = true
+		} else {
+			var v float64
+			if err := json.Unmarshal(raw.Eq, &v); err != nil {
+				return err
+			}
+			n.Eq = &v
+		}
+	}
+	if len(raw.Ne) > 0 {
+		if bytes.Equal(bytes.TrimSpace(raw.Ne), []byte("null")) {
+			n.NeNull = true
+		} else {
+			var v float64
+			if err := json.Unmarshal(raw.Ne, &v); err != nil {
+				return err
+			}
+			n.Ne = &v
+		}
+	}
+	n.Gt = raw.Gt
+	n.Gte = raw.Gte
+	n.In = raw.In
+	n.Lt = raw.Lt
+	n.Lte = raw.Lte
+	n.NotIn = raw.NotIn
 	return nil
 }
 
@@ -418,4 +534,3 @@ func ParseUserFilters(rawJSON string, knownUsers []string) (UserFilterMap, error
 
 	return userMap, nil
 }
-

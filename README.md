@@ -13,13 +13,14 @@ A modern, standalone visual filter designer and testing playground for the **Imm
 
 - **🌲 Visual Nested Rule Tree**:
   - Nest `ALL (AND)` and `ANY (OR)` logic groups to arbitrary depths.
-  - Automatically compiles and normalizes nested criteria into valid Immich Search API v2 `SearchFilter` JSON.
+  - Supports Immich Search API v2 fields including People, Albums, Tags, Locations, Camera/Lens, Date Taken, Date Added (`createdAt`), Original Path, File Size, Rating, OCR, and nullable (`is empty` / `is not empty`) checks.
+  - Automatically compiles and normalizes nested criteria into valid Immich Search API v2 `SearchFilter` JSON while preserving unrecognized/advanced JSON fields losslessly as raw rules.
   - Live auto-complete and dropdown options populated dynamically from your own Immich instance (People, Albums, Tags, Countries, States, Cities, Cameras, Makes, and Lenses).
 
 - **📁 Search Profiles & Quick Switching**:
   - Save your favourite search filters and query parameters into named profiles.
-  - Quick-switch between custom saved profiles via a dedicated dropdown.
-  - Profiles remember rule trees, search modes, target user accounts, sort settings, and video/archive options.
+  - Quick-switch between custom saved profiles via a dedicated dropdown, and export/import profiles as JSON files (`⇩ Export` / `⇧ Import`).
+  - Profiles remember rule trees, search modes (including Smart Search phrases), target user accounts, sort settings, and video/archive options.
   - Per-profile modification history with undo/redo, persisted alongside profiles.
   - Changes to a selected profile stay as drafts until **Save Changes** is clicked; switching profiles prompts to save, discard, or cancel. Use **Save as Copy** to save edits as a separate profile without replacing the original.
   - Synchronized via backend API (`/api/profiles`) with seamless local browser persistence fallback.
@@ -29,14 +30,17 @@ A modern, standalone visual filter designer and testing playground for the **Imm
   - Paste or edit raw JSON directly in the editor and press `Ctrl+Enter` (**Apply to Tree**) to dynamically parse and reconstruct the visual tree.
 
 - **📦 Request Payload & cURL Inspector**:
-  - View the exact POST payload sent to `/api/search/random` or `/api/search/metadata`.
+  - View the exact POST payload sent to `/api/search/random`, `/api/search/metadata`, or `/api/search/smart`.
   - Copy ready-to-run `curl` commands to clipboard for scripts, cron jobs, or API integrations.
 
 - **🖼️ Live Asset Preview & Lightbox**:
-  - Toggle between **Random Sample** (`/api/search/random`) with instant re-shuffling and **Metadata Search** (`/api/search/metadata`) with custom sort orders.
-  - Asset counter showing exact or estimated total matching photos and videos.
+  - Toggle between **Random Sample** (`/api/search/random`) with instant re-shuffling, **Sorted Timeline** (`/api/search/metadata`) with custom sort orders, and **Smart Search** (`/api/search/smart`) for CLIP natural-language queries combined with filter rules.
+  - Non-blocking asset counter showing exact or estimated total matching photos and videos without delaying thumbnail rendering.
   - Multi-account support: test filters against an individual account or across all configured user accounts simultaneously.
   - Lightbox modal with full-resolution photo preview, video player, EXIF metadata inspector, tagged people, and a direct link to open the photo in Immich.
+
+- **🔒 Optional Basic Auth Guard**:
+  - Protect your playground instance with HTTP Basic Auth (`PLAYGROUND_AUTH_PASSWORD` / `server.auth_password`) when exposed on a LAN or reverse proxy, while keeping `/healthz` open for container healthchecks.
 
 - **🚀 Zero-Dependency Single Binary**:
   - Written in modern Go with embedded web assets (`//go:embed`). No Node.js runtime, Python virtual environment, or external dependencies required.
@@ -120,6 +124,9 @@ You can configure the application using a YAML file (`config.yaml`), a `.env` fi
 | :--- | :--- | :--- | :--- |
 | `server.host` | `PLAYGROUND_HOST` / `HOST` | `0.0.0.0` | IP address to bind server |
 | `server.port` | `PLAYGROUND_PORT` / `PORT` | `8090` | HTTP listening port |
+| `server.profiles_file` | `PLAYGROUND_PROFILES_FILE` | `profiles.json` | Path to persistent profiles JSON file |
+| `server.auth_username` | `PLAYGROUND_AUTH_USERNAME` | `admin` | Optional HTTP Basic Auth username (used when `auth_password` is set) |
+| `server.auth_password` | `PLAYGROUND_AUTH_PASSWORD` | — | Optional password enabling HTTP Basic Auth on all routes except `/healthz` |
 | `immich.url` | `IMMICH_URL` | — | Base URL of your Immich instance |
 | `immich.external_url` | `IMMICH_EXTERNAL_URL` | `immich.url` | Public URL for "Open in Immich" links |
 | `immich.accounts` | `IMMICH_ACCOUNTS` / `IMMICH_ACCOUNT_<NAME>` | — | Immich user account(s) and API key(s) |
@@ -165,8 +172,10 @@ The backend provides a lightweight REST API for the frontend and health checks:
 - `GET /api/bootstrap`: Returns server configuration status, user list, and preloaded Immich metadata (People, Albums, Tags, Locations).
 - `POST /api/metadata/refresh`: Flushes internal metadata cache and reloads entities from Immich.
 - `POST /api/search`: Executes the normalized Immich search query and returns matched asset items.
+- `POST /api/search/count`: Computes the total matching asset count asynchronously without blocking thumbnail rendering.
 - `GET /api/profiles`: Lists saved search profiles.
 - `POST /api/profiles`: Creates or updates a search profile.
+- `POST /api/profiles/import`: Imports and upserts a batch of profiles from JSON.
 - `DELETE /api/profiles/{id}`: Deletes a saved search profile.
 - `GET /api/media/{thumbnail|preview|original}/{id}`: Authenticated media proxy streaming assets without exposing credentials to the browser.
 
@@ -175,8 +184,11 @@ The backend provides a lightweight REST API for the frontend and health checks:
 ## 🛠️ Development & Testing
 
 ```bash
-# Run unit tests
+# Run Go unit tests
 go test -v ./...
+
+# Run frontend filter compiler & rule-tree unit tests (Node 20+)
+node --test "web_tests/*.test.js"
 
 # Run static analysis
 go vet ./...

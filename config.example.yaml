@@ -5,6 +5,9 @@
 server:
   host: "0.0.0.0"
   port: 8090
+  # Optional: Enable HTTP Basic Auth (all routes except /healthz)
+  # auth_username: "admin"
+  # auth_password: "your_strong_password"
 
 immich:
   # Base URL of your Immich instance (used by the backend server to query Immich)

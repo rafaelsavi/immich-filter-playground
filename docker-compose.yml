@@ -15,6 +15,10 @@ services:
       # Optional: Skip TLS verification for self-signed certificates
       # - IMMICH_INSECURE_SKIP_VERIFY=true
 
+      # Optional: Protect the UI and media proxy with HTTP Basic Auth
+      # - PLAYGROUND_AUTH_USERNAME=admin
+      # - PLAYGROUND_AUTH_PASSWORD=your_strong_password
+
       # Defaults
       - PLAYGROUND_SAMPLE_SIZE=24
       - PLAYGROUND_SEARCH_MODE=random

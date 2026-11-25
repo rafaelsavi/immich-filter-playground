@@ -133,3 +133,38 @@ immich:
 		t.Errorf("expected single-user-key, got %q", cfg.APIKeyForUser(""))
 	}
 }
+
+func TestLoadBasicAuthConfigAndEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+server:
+  auth_password: "yaml-secret"
+`
+	if err := os.WriteFile(cfgFile, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("writing temp config: %v", err)
+	}
+
+	// Password without username defaults username to "admin"
+	t.Setenv("PLAYGROUND_AUTH_USERNAME", "")
+	t.Setenv("PLAYGROUND_AUTH_PASSWORD", "")
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Server.AuthUsername != "admin" || cfg.Server.AuthPassword != "yaml-secret" {
+		t.Fatalf("expected default admin/yaml-secret, got %q/%q", cfg.Server.AuthUsername, cfg.Server.AuthPassword)
+	}
+
+	// Environment variables override YAML
+	t.Setenv("PLAYGROUND_AUTH_USERNAME", "rafael")
+	t.Setenv("PLAYGROUND_AUTH_PASSWORD", "env-secret")
+	cfgEnv, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load with env returned error: %v", err)
+	}
+	if cfgEnv.Server.AuthUsername != "rafael" || cfgEnv.Server.AuthPassword != "env-secret" {
+		t.Fatalf("expected rafael/env-secret, got %q/%q", cfgEnv.Server.AuthUsername, cfgEnv.Server.AuthPassword)
+	}
+}

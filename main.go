@@ -76,6 +76,9 @@ func main() {
 	} else {
 		log.Printf("⚠️  Immich credentials not yet configured. Create config.yaml (see config.example.yaml) or set IMMICH_URL & IMMICH_ACCOUNTS.")
 	}
+	if cfg.Server.AuthPassword != "" {
+		log.Printf("🔒 HTTP Basic Auth enabled (user: %s)", cfg.Server.AuthUsername)
+	}
 
 	// Graceful shutdown on SIGINT or SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

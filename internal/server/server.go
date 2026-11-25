@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"io/fs"
 	"net/http"
@@ -42,6 +44,20 @@ func New(cfg *config.Config, version string) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Server.AuthPassword != "" && r.URL.Path != "/healthz" {
+		user, pass, ok := r.BasicAuth()
+		expectedUser := sha256.Sum256([]byte(s.cfg.Server.AuthUsername))
+		gotUser := sha256.Sum256([]byte(user))
+		expectedPass := sha256.Sum256([]byte(s.cfg.Server.AuthPassword))
+		gotPass := sha256.Sum256([]byte(pass))
+		userMatch := subtle.ConstantTimeCompare(gotUser[:], expectedUser[:]) == 1
+		passMatch := subtle.ConstantTimeCompare(gotPass[:], expectedPass[:]) == 1
+		if !ok || !userMatch || !passMatch {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Immich Filter Playground", charset="UTF-8"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, r)
 }
 

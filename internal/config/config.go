@@ -68,6 +68,8 @@ type ServerConfig struct {
 	Host         string `yaml:"host" json:"host"`
 	Port         int    `yaml:"port" json:"port"`
 	ProfilesFile string `yaml:"profiles_file,omitempty" json:"-"`
+	AuthUsername string `yaml:"auth_username,omitempty" json:"-"`
+	AuthPassword string `yaml:"auth_password,omitempty" json:"-"`
 }
 
 // ImmichConfig configures the connection and credentials for Immich.
@@ -176,6 +178,12 @@ func (c *Config) applyEnvOverrides() {
 	if pf := firstNonEmptyEnv("PLAYGROUND_PROFILES_FILE", "PROFILES_FILE"); pf != "" {
 		c.Server.ProfilesFile = pf
 	}
+	if authUser := firstNonEmptyEnv("PLAYGROUND_AUTH_USERNAME"); authUser != "" {
+		c.Server.AuthUsername = authUser
+	}
+	if authPass := firstNonEmptyEnv("PLAYGROUND_AUTH_PASSWORD"); authPass != "" {
+		c.Server.AuthPassword = authPass
+	}
 
 	if u := firstNonEmptyEnv("IMMICH_URL"); u != "" {
 		c.Immich.URL = u
@@ -252,6 +260,11 @@ func (c *Config) applyEnvOverrides() {
 func (c *Config) normalize() {
 	if c.Server.ProfilesFile == "" {
 		c.Server.ProfilesFile = "profiles.json"
+	}
+	c.Server.AuthUsername = strings.TrimSpace(c.Server.AuthUsername)
+	c.Server.AuthPassword = strings.TrimSpace(c.Server.AuthPassword)
+	if c.Server.AuthPassword != "" && c.Server.AuthUsername == "" {
+		c.Server.AuthUsername = "admin"
 	}
 
 	c.Immich.URL = strings.TrimRight(strings.TrimSpace(c.Immich.URL), "/")

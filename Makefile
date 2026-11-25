@@ -3,7 +3,7 @@
 BINARY_NAME=immich-filter-playground
 VERSION ?= $(shell grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
 ifeq ($(VERSION),)
-VERSION = 1.8.1
+VERSION = 1.9.0
 endif
 
 all: test build

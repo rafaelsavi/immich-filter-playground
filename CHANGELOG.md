@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The version is centrally maintained in `pyproject.toml` and injected into Go builds.
 
+## [1.9.0] - 2026-11-25
+
+### Added
+- **Smart Search Mode (`/api/search/smart`)**: Added a **✨ Smart Search** mode with a natural-language phrase input (`?q=` URL sync, profile persistence, and cURL/request preview) to run Immich CLIP semantic searches combined with rule-tree filters.
+- **Additional Visual Builder Fields & Nullable Operators**: Added **Date Added** (`createdAt`), **Original Path** (`originalPath`), and **File Size** (`fileSizeInBytes` with `B`/`KB`/`MB`/`GB` units), plus **is empty / unknown** (`{ eq: null }`) and **is not empty** (`{ ne: null }`) operators for nullable string fields and ratings.
+- **Profile JSON Export & Import**: Added **⇩ Export** and **⇧ Import** actions in the profile toolbar backed by `POST /api/profiles/import` for portable backup and sharing.
+- **Optional HTTP Basic Auth Guard**: Added `server.auth_username` / `server.auth_password` (`PLAYGROUND_AUTH_USERNAME` / `PLAYGROUND_AUTH_PASSWORD`) to protect the UI, API, and media proxy while keeping `/healthz` accessible.
+- **Frontend Unit Tests**: Added zero-dependency `node --test "web_tests/*.test.js"` coverage for the filter compiler, decompiler, and rule-tree grouping helpers, wired into `Makefile` and GitHub Actions CI.
+
+### Changed
+- **Non-Blocking Asset Counting**: Decoupled asset counting into `POST /api/search/count` so live thumbnails render immediately without waiting for paginated count sweeps on large libraries.
+
+### Fixed
+- **Date Upper-Bound Inclusion**: Date-only strings in `lte`, `gt`, and `takenBefore` now resolve to the end of the day (`23:59:59.999Z`) instead of midnight at the start of the day.
+- **Compiler & Lossless Round-Trip**: Fixed `AND`-merging two `any` ID lists into an erroneous union (now expanded into exact `OR` pairs), preserved `0` values in `NumberFilter`/`NumberFilterNullable`, kept unrecognized fields or unsupported operators as editable raw JSON rules on **Apply to Tree**, and applied default type/visibility constraints per `OR` branch.
+- **Multi-Account Timeline Ordering**: Preserved the requested `orderBy` sort order when merging Sorted Timeline results across multiple accounts instead of interleaving round-robin.
+- **UI & Version Parity**: Synced sort, media toggles, and display limit changes to the URL and history, replaced the undefined `--bg-hover` CSS token, and aligned fallback versions across `main.go`, `Dockerfile`, and `Makefile` with `pyproject.toml` (guarded by `TestVersionFallbacksMatchPyproject`).
+
 ## [1.8.1] - 2026-11-20
 
 ### Changed

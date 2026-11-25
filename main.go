@@ -17,7 +17,7 @@ import (
 	"immich-filter-playground/internal/server"
 )
 
-var version = "1.8.1"
+var version = "1.9.0"
 
 func main() {
 	configPath := flag.String("config", "", "Path to config.yaml file (defaults to ./config.yaml or CONFIG_FILE env var)")
